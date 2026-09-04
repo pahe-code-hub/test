@@ -192,7 +192,7 @@ Empfohlenes Schema wie v0.1, ergänzt um:
 * Research: bestätigter Intake, Verständniszusammenfassung
 * Architect: bestätigter Intake, Research-Zusammenfassung
 * Challenger: bestätigter Intake, Research-Zusammenfassung
-* Synthesizer: bestätigter Intake, Research-Zusammenfassung, Architect, Challenger
+* Synthesizer: bestätigter Intake, Research-Zusammenfassung **inklusive der zugehörigen `research_sources`-Einträge (id, url, title, finding, license_info)** — ohne die IDs kann die Synthese `existing_solutions_open_source` nicht auf konkrete Quellen verweisen (Konsistenzfund aus der Nutzerprüfung des Übergabepakets, siehe `AGENT_PROMPTS.md`), Architect, Challenger
 * Critic: bestätigter Intake, relevante Research-Erkenntnisse, Synthese (bewusst ohne Architect-/Challenger-Rohentwürfe, ADR-005)
 * Evaluator: bestätigter Intake, aktueller Synthese-Stand, ursprüngliche Critic-Findings, Diff-Notiz der letzten Revision (nicht die volle Revisionshistorie)
 * **Final Builder: bestätigter Intake, freigegebenes Zielkonzept, relevante Entscheidungen, sowie die im Zielkonzept referenzierten Open-Source-/Bestandslösungs-Einträge** `[v0.2, behebt Widerspruch aus Review 3 §3.1]`
