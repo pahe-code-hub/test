@@ -93,7 +93,7 @@ Zulässige Übergänge werden weiterhin ausschließlich im Backend kontrolliert.
 
 **Neue verbindliche Pipeline-Regel:** `research()` darf ausschließlich Ergebnisse zurückgeben, die aus einem tatsächlichen Retrieval-Aufruf stammen (Suchtreffer oder abgerufene Seite). Der Research-Agent-Prompt darf ausschließlich mit den von `research()` gelieferten, bereits verifizierten Fundstellen arbeiten und **keine zusätzlichen, nicht abgerufenen Quellen ergänzen** — die Belegpflicht aus v0.1 wird damit technisch statt nur durch Prompt-Anweisung durchgesetzt.
 
-> Offener Punkt: Die konkrete technische Anbindung von `research()` (welches Such-/Fetch-Werkzeug) ist noch nicht entschieden — siehe `DECISIONS.md`, ADR-003. **Dies ist ein Blocker für Phase 2** (Review 2 §2.3).
+> **Entschieden (ADR-003, ACCEPTED):** `research()` wird für V1 über Tavily implementiert (Search + Extract, nicht Tavily Research/Deep-Research) — siehe `DECISIONS.md`, ADR-003 für Begründung, Alternativen und den Validierungsvorbehalt (5 reale Testfälle vor endgültiger Freigabe von Phase 2, siehe Abschnitt 35).
 
 ## 9. Architect `[v0.2 — Prompt-Ergänzung, Review 3 §3.2]`
 
@@ -245,9 +245,9 @@ Parallel ausführbar: Architect + Challenger, mit getrennten Run-Status pro Agen
 
 Nicht parallel: Understanding und User-Bestätigung; Synthese vor Architect/Challenger; Evaluation vor Critic; Final Builder vor PASS.
 
-## 35. MVP-Phasen `[v0.2 — Phase-2-Blocker markiert, Review 2 §2.3]`
+## 35. MVP-Phasen `[v0.2 — Phase-2-Voraussetzung präzisiert, Review 2 §2.3, ADR-003]`
 
-*(Phasen 1–8 wie v0.1)* — **Hinweis:** Phase 2 (Research) kann erst begonnen werden, nachdem die technische Anbindung der `research()`-Schnittstelle entschieden ist (ADR-003, offen).
+*(Phasen 1–8 wie v0.1)* — **Hinweis:** Phase 2 (Research) implementiert `research()` über Tavily (ADR-003, ACCEPTED). Die endgültige Freigabe von Phase 2 setzt zusätzlich die in ADR-003 festgelegte Validation voraus (mindestens 5 repräsentative Research-Aufgaben, bewertet nach Relevanz, Quellenqualität, Aktualität, Vollständigkeit, Extraktionsqualität, Kosten, Laufzeit) — bei unzureichendem Abschneiden, insbesondere bei GitHub-/Open-Source-Recherche, ist Exa der erste alternative Kandidat.
 
 ## 36. Akzeptanzkriterien MVP
 

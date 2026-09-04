@@ -20,13 +20,78 @@ Format je Eintrag: Decision, Reason, Alternatives, Trade-off, Status. Fortlaufen
 **Trade-off:** keiner erkennbar für den beschriebenen Anwendungsfall; falls künftig echte bidirektionale Kommunikation über denselben Kanal nötig wird, muss neu evaluiert werden.
 **Status:** Accepted (Review 2 §2.1, Review 5 §5.2)
 
-## ADR-003
+## ADR-003 — Research-/Retrieval-Provider für V1
 
-**Decision:** Technische Anbindung der `research()`-Schnittstelle
-**Reason:** —
-**Alternatives:** noch zu bewerten (OpenClaw-natives Web-Such-/Fetch-Tool sofern vorhanden, sonst dedizierte Such-API)
-**Trade-off:** —
-**Status:** **OPEN — Blocker für MVP-Phase 2** (Review 2 §2.3). Muss entschieden sein, bevor Phase 2 beginnt.
+**Status:** ACCEPTED (gemeinsam entschieden, unter Testvorbehalt — siehe Validation)
+
+### Decision
+
+Tavily wird für V1 als primärer Research-/Retrieval-Provider verwendet.
+
+Die Integration erfolgt ausschließlich über eine interne `ResearchProvider`-Abstraktion (deckt sich mit der in Abschnitt 21 des Masterplans bereits vorgesehenen `research()`-Schnittstelle). Der Research-Agent darf keine Tavily-spezifischen Abhängigkeiten enthalten.
+
+Für V1 werden verwendet:
+
+* Tavily Search
+* Tavily Extract
+
+Optional später: Tavily Crawl (z. B. für umfangreiche technische Dokumentationen).
+
+**Tavily Research / Deep-Research-Funktionen werden für V1 ausdrücklich NICHT verwendet.** Der Research-Agent bleibt eigene Prompt-Logik, Quellenauswahl und Halluzinationsschutz (Abschnitt 8/21 des Masterplans) — kein fertiges Drittanbieter-Rechercheergebnis wird ungeprüft übernommen:
+
+```
+Unser Research Agent
+        │
+        ▼
+ResearchProvider
+        │
+        ▼
+Tavily
+ ├─ Search
+ └─ Extract
+```
+
+nicht `Unser Agent → Tavily Research → fertiges Ergebnis`.
+
+### Reason
+
+Tavily bietet Search und Content-Extraction über einen einzelnen Provider und reduziert damit den Integrationsaufwand für das MVP. Die Funktionen passen unmittelbar zum benötigten Workflow:
+
+```
+SEARCH → Quellen auswählen → Originalinhalt EXTRACT → Findings ableiten → Quellen speichern
+```
+
+Kosten aktuell (siehe `ADR-003_CANDIDATES.md` für den vollständigen Vergleich): 1.000 Credits/Monat kostenlos, Basic Search 1 Credit, Advanced Search 2 Credits, Basic Extract 1 Credit je 5 erfolgreiche URL-Extraktionen, Pay-as-you-go 0,008 $/Credit ([Tavily Docs](https://docs.tavily.com/documentation/api-reference/endpoint/crawl)). Tavily Research ist bewusst ausgeschlossen, da es je nach Modus deutlich mehr Credits pro Request verbraucht als Search+Extract ([Tavily Docs](https://docs.tavily.com/documentation/api-credits)) und dem Research-Agenten die in Abschnitt 8/21 geforderte Kontrolle über Quellenauswahl und Belegpflicht entziehen würde.
+
+Die bestehende Provider-Abstraktion bleibt erhalten, sodass Tavily später ohne Änderung der Agentenlogik ersetzt oder ergänzt werden kann.
+
+### Alternatives
+
+**Exa** — sehr guter Kandidat insbesondere für technische Dokumentation, GitHub-/Code-Recherche und spätere spezialisierte Recherche (Search $7/1.000 Requests, Contents $1/1.000 Seiten). Für V1 zurückgestellt — kein ausreichend großer Vorteil gegenüber Tavily, um den zusätzlichen Wechsel zu rechtfertigen. Erster Kandidat für einen `ExaResearchProvider`, falls die Validation (siehe unten) zeigt, dass Open-Source-/Repository-Recherche mit Tavily zu schwach ist.
+
+**Brave Search + Jina Reader** — technisch der sauberste Fit zur geforderten Provider-Unabhängigkeit (unabhängiger Suchindex, geringster Lock-in pro Baustein), aber zwei APIs, zwei Fehlerbilder, zwei Rate-Limits, zwei Kostenmodelle, zwei Secrets — für V1 unnötige Komplexität. Für eine spätere Kosten-/Lock-in-Optimierung vorgemerkt.
+
+**Modellprovider-native Websuche (z. B. Anthropic `web_search`)** — nicht gewählt, da dadurch Research- und Modellprovider gekoppelt würden und genau die in Abschnitt 20/21 geforderte Unabhängigkeit unterlaufen würde.
+
+### Consequences
+
+Positiv: geringer Implementierungsaufwand; ein Research-Provider für Search + Extraction; Quellen bleiben nachvollziehbar; Provider bleibt austauschbar; einfacher Kosten- und Fehlerpfad.
+
+Negativ: zusätzliche externe Abhängigkeit; Qualität bei GitHub-/Code-Recherche muss praktisch getestet werden; mögliche spätere Migration zu Exa oder Multi-Provider-Ansatz.
+
+### Validation
+
+Vor endgültiger Freigabe von MVP-Phase 2 werden mindestens 5 repräsentative Research-Aufgaben ausgeführt, darunter mindestens:
+
+1. allgemeine bestehende Softwarelösung
+2. Open-Source-Projekt auf GitHub
+3. technische Framework-/Library-Recherche
+4. offizielle Herstellerdokumentation
+5. aktuelle Best-Practice-Recherche
+
+Bewertet werden: Relevanz, Quellenqualität, Aktualität, Vollständigkeit, Extraktionsqualität, Kosten, Laufzeit.
+
+Falls Tavily hierbei unzureichend abschneidet — insbesondere bei GitHub-/Open-Source-Recherche — ist Exa der erste alternative Provider-Kandidat.
 
 ## ADR-004
 
