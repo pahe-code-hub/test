@@ -3,8 +3,8 @@
 ## Technischer Umsetzungsplan für OpenClaw
 
 **Version:** 0.2
-**Status:** Nach 5 externen Review-Pässen überarbeitet — siehe `reviews/FINAL_REVIEW_SUMMARY.md`
-**Ziel:** Freigabe dieser Version, danach Erstellung des vollständigen Übergabepakets (Abschnitt 39) und Umsetzung in OpenClaw
+**Status:** **APPROVED** (Nutzerfreigabe auf Commit `5ef2297`, nach Korrektur der Abschnitt-21-Inkonsistenz und der `ESCALATION_REQUIRED`-Rückwege) — siehe `reviews/FINAL_REVIEW_SUMMARY.md` für die vorangegangenen 5 Review-Pässe
+**Ziel:** Erstellung des vollständigen Übergabepakets (Abschnitt 39), danach Umsetzung in OpenClaw
 
 > Diese Version übernimmt alle KRITISCH und WICHTIG eingestuften Änderungen aus den fünf Reviews. Änderungen gegenüber v0.1 sind mit `[v0.2]` markiert. Unveränderte Abschnitte sind aus v0.1 übernommen. Vollständige Begründungen stehen in `reviews/*.md`.
 
@@ -91,9 +91,9 @@ Zulässige Übergänge werden weiterhin ausschließlich im Backend kontrolliert.
 
 *(Inhalt wie v0.1, zusätzlich:)*
 
-**Neue verbindliche Pipeline-Regel:** `research()` darf ausschließlich Ergebnisse zurückgeben, die aus einem tatsächlichen Retrieval-Aufruf stammen (Suchtreffer oder abgerufene Seite). Der Research-Agent-Prompt darf ausschließlich mit den von `research()` gelieferten, bereits verifizierten Fundstellen arbeiten und **keine zusätzlichen, nicht abgerufenen Quellen ergänzen** — die Belegpflicht aus v0.1 wird damit technisch statt nur durch Prompt-Anweisung durchgesetzt.
+**Neue verbindliche Pipeline-Regel:** die `ResearchProvider`-Abstraktion (Abschnitt 21: `search()` + `extract()`) darf ausschließlich Ergebnisse zurückgeben, die aus einem tatsächlichen Retrieval-Aufruf stammen (Suchtreffer oder abgerufene Seite). Der Research-Agent-Prompt darf ausschließlich mit den so gelieferten, bereits verifizierten Fundstellen arbeiten und **keine zusätzlichen, nicht abgerufenen Quellen ergänzen** — die Belegpflicht aus v0.1 wird damit technisch statt nur durch Prompt-Anweisung durchgesetzt.
 
-> **Entschieden (ADR-003, ACCEPTED):** `research()` wird für V1 über Tavily implementiert (Search + Extract, nicht Tavily Research/Deep-Research) — siehe `DECISIONS.md`, ADR-003 für Begründung, Alternativen und den Validierungsvorbehalt (5 reale Testfälle vor endgültiger Freigabe von Phase 2, siehe Abschnitt 35).
+> **Entschieden (ADR-003, ACCEPTED):** die `ResearchProvider`-Abstraktion wird für V1 über Tavily implementiert (`search` + `extract`, nicht Tavily Research/Deep-Research) — siehe `DECISIONS.md`, ADR-003 für Begründung, Alternativen und den Validierungsvorbehalt (5 reale Testfälle vor endgültiger Freigabe von Phase 2, siehe Abschnitt 35).
 
 ## 9. Architect `[v0.2 — Prompt-Ergänzung, Review 3 §3.2]`
 
@@ -166,9 +166,14 @@ Modellklassen: LOW, MEDIUM, HIGH. **LOW ist für V1 nicht im Einsatz, aber als K
 
 Bei Überschreitung von Timeout/Provider-Retries wird der Agentenlauf als technisch fehlgeschlagen markiert (`last_run_status = FAILED`, siehe Abschnitt 5) — dieser technische Retry ist getrennt von den in Abschnitt 27 beschriebenen Workflow-Retries.
 
-## 21. Research-Abstraktion
+## 21. Research-Abstraktion `[v0.2 — Signatur an ADR-003 angepasst, Konsistenzfix beim Erstellen des Übergabepakets]`
 
-*(unverändert in der Signatur — `research(query, requirements, source_policy)` — ergänzt um die in Abschnitt 8 beschriebene Pipeline-Regel: nur retrieval-belegte Funde. Konkrete Anbindung: entschieden — Tavily Search + Extract, hinter der `ResearchProvider`-Abstraktion gekapselt, siehe `DECISIONS.md` ADR-003, ACCEPTED.)*
+Die in v0.1 als einzelner Aufruf skizzierte Schnittstelle `research(query, requirements, source_policy)` wird mit der ADR-003-Entscheidung (Tavily Search + Extract als zwei getrennte, unabhängig aufrufbare Operationen, siehe `DECISIONS.md`) auf zwei Methoden der `ResearchProvider`-Abstraktion präzisiert:
+
+* `search(query, requirements, source_policy)` → Kandidaten-Treffer (URL, Titel, Snippet)
+* `extract(urls)` → Volltext/Markdown je ausgewählter URL, inkl. `retrieved_at`
+
+Diese Trennung war in v0.1 als einzelne Funktion zu grob spezifiziert, um die in `AGENT_PROMPTS.md` (Rolle `research_v1`) beschriebene Arbeitsweise abzubilden: erst Suchergebnisse sichten und Quellen auswählen, dann gezielt extrahieren — nicht beides in einem opaken Aufruf. Rückgabeform je Fundstelle unverändert strukturiert: `source`, `title`, `finding`, `relevance`, `confidence`, `license_info`, `retrieved_at` (siehe `DATA_MODEL.md`, Tabelle `research_sources`). Nur belegte, aus einem tatsächlichen `extract`-Aufruf stammende Findings dürfen in spätere Agentenprompts eingehen (Abschnitt 8, Review 3 §3.4). Konkrete Anbindung: Tavily hinter dieser Abstraktion gekapselt (ADR-003, ACCEPTED) — ein späterer Wechsel zu Exa oder einem anderen Provider erfordert keine Änderung an `research_v1` oder nachgelagerten Agenten, solange der neue Provider beide Methoden bedienen kann.
 
 ## 22. Projekt-State `[v0.2 — Schema ergänzt, Review 2 §2.2, §2.6, Review 5 §5.1]`
 
@@ -247,7 +252,7 @@ Nicht parallel: Understanding und User-Bestätigung; Synthese vor Architect/Chal
 
 ## 35. MVP-Phasen `[v0.2 — Phase-2-Voraussetzung präzisiert, Review 2 §2.3, ADR-003]`
 
-*(Phasen 1–8 wie v0.1)* — **Hinweis:** Phase 2 (Research) implementiert `research()` über Tavily (ADR-003, ACCEPTED). Die endgültige Freigabe von Phase 2 setzt zusätzlich die in ADR-003 festgelegte Validation voraus (mindestens 5 repräsentative Research-Aufgaben, bewertet nach Relevanz, Quellenqualität, Aktualität, Vollständigkeit, Extraktionsqualität, Kosten, Laufzeit) — bei unzureichendem Abschneiden, insbesondere bei GitHub-/Open-Source-Recherche, ist Exa der erste alternative Kandidat.
+*(Phasen 1–8 wie v0.1)* — **Hinweis:** Phase 2 (Research) implementiert die `ResearchProvider`-Abstraktion (`search`/`extract`, Abschnitt 21) über Tavily (ADR-003, ACCEPTED). Die endgültige Freigabe von Phase 2 setzt zusätzlich die in ADR-003 festgelegte Validation voraus (mindestens 5 repräsentative Research-Aufgaben, bewertet nach Relevanz, Quellenqualität, Aktualität, Vollständigkeit, Extraktionsqualität, Kosten, Laufzeit) — bei unzureichendem Abschneiden, insbesondere bei GitHub-/Open-Source-Recherche, ist Exa der erste alternative Kandidat.
 
 ## 36. Akzeptanzkriterien MVP
 
@@ -259,7 +264,7 @@ Nicht parallel: Understanding und User-Bestätigung; Synthese vor Architect/Chal
 
 ## 38. Externe Review-Schleife mit Claude
 
-Abgeschlossen für v0.1 → v0.2. Ergebnis: siehe `reviews/FINAL_REVIEW_SUMMARY.md`. `FINAL_REVIEW_STATUS = CHANGES_REQUIRED` (v0.1) — die dort als kritisch/wichtig eingestuften Änderungen sind in dieser Version (v0.2) eingearbeitet.
+Abgeschlossen für v0.1 → v0.2. Ergebnis: siehe `reviews/FINAL_REVIEW_SUMMARY.md`. `FINAL_REVIEW_STATUS = CHANGES_REQUIRED` (v0.1) — die dort als kritisch/wichtig eingestuften Änderungen sind in v0.2 eingearbeitet. Nach Korrektur zweier bei der Nutzerprüfung gefundener Restpunkte (Abschnitt-21-Inkonsistenz, `ESCALATION_REQUIRED`-Rückwege) wurde v0.2 auf Commit `5ef2297` durch den Nutzer **APPROVED**.
 
 ## 39. Übergabepaket an OpenClaw
 
@@ -267,13 +272,13 @@ Nach Freigabe von v0.2:
 
 1. MASTER_PLAN.md *(dieses Dokument)*
 2. WORKFLOW_STATES.md *(erstellt)*
-3. AGENT_PROMPTS.md *(ausstehend)*
-4. DATA_MODEL.md *(ausstehend)*
-5. API_CONTRACT.md *(ausstehend)*
-6. ACCEPTANCE_TESTS.md *(ausstehend)*
+3. AGENT_PROMPTS.md *(erstellt)*
+4. DATA_MODEL.md *(erstellt)*
+5. API_CONTRACT.md *(erstellt)*
+6. ACCEPTANCE_TESTS.md *(erstellt)*
 7. DECISIONS.md *(erstellt)*
 
-Optional: UI_WIREFRAMES.md, SECURITY.md, docker-compose.yml/Setup-Spezifikation.
+Optional: UI_WIREFRAMES.md *(zurückgestellt, kein Blocker für Phase 1)*, SECURITY.md *(erstellt)*, docker-compose.yml/Setup-Spezifikation *(zurückgestellt, erst ab Phase 7/8 relevant)*.
 
 ## 40. Umsetzungsregel für OpenClaw
 

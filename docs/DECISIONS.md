@@ -28,7 +28,7 @@ Format je Eintrag: Decision, Reason, Alternatives, Trade-off, Status. Fortlaufen
 
 Tavily wird für V1 als primärer Research-/Retrieval-Provider verwendet.
 
-Die Integration erfolgt ausschließlich über eine interne `ResearchProvider`-Abstraktion (deckt sich mit der in Abschnitt 21 des Masterplans bereits vorgesehenen `research()`-Schnittstelle). Der Research-Agent darf keine Tavily-spezifischen Abhängigkeiten enthalten.
+Die Integration erfolgt ausschließlich über eine interne `ResearchProvider`-Abstraktion (deckt sich mit der in Abschnitt 21 des Masterplans vorgesehenen Schnittstelle `search()`/`extract()` — bei dieser Gelegenheit von einem einzelnen `research()`-Aufruf auf zwei Methoden präzisiert, siehe dortige v0.2-Anmerkung). Der Research-Agent darf keine Tavily-spezifischen Abhängigkeiten enthalten.
 
 Für V1 werden verwendet:
 
