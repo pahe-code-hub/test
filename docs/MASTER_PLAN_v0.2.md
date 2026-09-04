@@ -70,10 +70,10 @@ Vollständige Übergangstabelle mit Guards: siehe `WORKFLOW_STATES.md`. Änderun
 * `clarification_round_count`, Limit `MAX_CLARIFICATION_ROUNDS = 3` → danach `ESCALATION_REQUIRED` (Review 1 §1.4)
 * `synthesis_revision_count` — kein hartes Limit, aber ab Runde 3 UI-Hinweis „Konzept grundlegend neu aufsetzen?" (Review 1 §1.2)
 
-**Definierte Ausgänge aus `ESCALATION_REQUIRED`** (Review 1 §1.5):
+**`ESCALATION_REQUIRED` trägt `escalation_reason ∈ {CLARIFICATION_LIMIT, REVISION_LIMIT}`** — die beiden Auslöser führen zu unterschiedlichen, klar getrennten Ausgängen (nicht ein einziger generischer Ausgang, siehe `WORKFLOW_STATES.md` für die vollständige Tabelle):
 
-* `ESCALATION_REQUIRED → REVISING` — Nutzer gibt Richtungsentscheidung vor, ein weiterer Revisionsversuch wird zugelassen
-* `ESCALATION_REQUIRED → FINALIZING` — Nutzer akzeptiert das Konzept trotz offener Punkte ausdrücklich; offene Punkte werden im Final-Builder-Output unter „OFFENE ENTSCHEIDUNGEN" sichtbar geführt
+* Bei `escalation_reason = REVISION_LIMIT` (Review 1 §1.5): `ESCALATION_REQUIRED → REVISING` — Nutzer gibt Richtungsentscheidung vor, ein weiterer Revisionsversuch am bestehenden Zielkonzept wird zugelassen; oder `ESCALATION_REQUIRED → FINALIZING` — Nutzer akzeptiert das bestehende Zielkonzept trotz offener Punkte ausdrücklich, offene Punkte werden im Final-Builder-Output unter „OFFENE ENTSCHEIDUNGEN" sichtbar geführt.
+* Bei `escalation_reason = CLARIFICATION_LIMIT`: **weder** `REVISING` **noch** `FINALIZING` sind gültige Ziele — an diesem Punkt im Workflow existiert noch kein Zielkonzept, da das Verständnis-Gate (Abschnitt 6/7) nie passiert wurde. Einziger Ausgang: `ESCALATION_REQUIRED → DRAFT`, der Nutzer überarbeitet die Idee grundlegend; `clarification_round_count` wird zurückgesetzt.
 
 Zulässige Übergänge werden weiterhin ausschließlich im Backend kontrolliert. Kein Agent darf eigenständig Workflow-Schritte überspringen.
 
@@ -168,7 +168,7 @@ Bei Überschreitung von Timeout/Provider-Retries wird der Agentenlauf als techni
 
 ## 21. Research-Abstraktion
 
-*(unverändert in der Signatur — `research(query, requirements, source_policy)` — ergänzt um die in Abschnitt 8 beschriebene Pipeline-Regel: nur retrieval-belegte Funde. Konkrete Anbindung: offen, siehe DECISIONS.md ADR-003.)*
+*(unverändert in der Signatur — `research(query, requirements, source_policy)` — ergänzt um die in Abschnitt 8 beschriebene Pipeline-Regel: nur retrieval-belegte Funde. Konkrete Anbindung: entschieden — Tavily Search + Extract, hinter der `ResearchProvider`-Abstraktion gekapselt, siehe `DECISIONS.md` ADR-003, ACCEPTED.)*
 
 ## 22. Projekt-State `[v0.2 — Schema ergänzt, Review 2 §2.2, §2.6, Review 5 §5.1]`
 

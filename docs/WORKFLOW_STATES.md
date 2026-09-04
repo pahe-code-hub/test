@@ -25,7 +25,7 @@ Vollständige Zustands- und Übergangstabelle für MASTER PLAN AI, Stand nach Re
 | `EVALUATING` | Evaluator läuft |
 | `REVISION_REQUIRED` | Evaluator hat Korrekturen gefordert |
 | `REVISING` | Revision Agent läuft |
-| `ESCALATION_REQUIRED` | Revisionslimit erreicht, Nutzer muss Grundsatzentscheidung treffen |
+| `ESCALATION_REQUIRED` | Nutzer muss Grundsatzentscheidung treffen. Trägt `escalation_reason ∈ {CLARIFICATION_LIMIT, REVISION_LIMIT}` — die beiden Auslöser führen zu unterschiedlichen Rückwegen (siehe Übergangstabelle), da bei `CLARIFICATION_LIMIT` noch gar kein Zielkonzept existiert, das revidiert oder finalisiert werden könnte |
 | `FINALIZING` | Final Builder läuft |
 | `COMPLETED` | Endzustand — Plan fertiggestellt |
 
@@ -37,7 +37,7 @@ Vollständige Zustands- und Übergangstabelle für MASTER PLAN AI, Stand nach Re
 | `UNDERSTANDING` | `WAITING_FOR_USER_CONFIRMATION` | Agent-Output = `READY` | — |
 | `UNDERSTANDING` | `WAITING_FOR_USER_CLARIFICATION` | Agent-Output = `CLARIFICATION_REQUIRED` oder `CONTRADICTION` (Sub-Status) | — |
 | `WAITING_FOR_USER_CLARIFICATION` | `UNDERSTANDING` | Nutzer beantwortet Rückfrage | `clarification_round_count < MAX_CLARIFICATION_ROUNDS (3)` |
-| `WAITING_FOR_USER_CLARIFICATION` | `ESCALATION_REQUIRED` | Nutzer beantwortet Rückfrage | `clarification_round_count >= MAX_CLARIFICATION_ROUNDS` *(neu, Review 1 §1.4)* |
+| `WAITING_FOR_USER_CLARIFICATION` | `ESCALATION_REQUIRED` | Nutzer beantwortet Rückfrage | `clarification_round_count >= MAX_CLARIFICATION_ROUNDS`; setzt `escalation_reason = CLARIFICATION_LIMIT` *(neu, Review 1 §1.4; Reason-Feld ergänzt nach Nutzer-Review v0.2)* |
 | `WAITING_FOR_USER_CONFIRMATION` | `RESEARCHING` | Nutzer klickt „RICHTIG VERSTANDEN" | — |
 | `WAITING_FOR_USER_CONFIRMATION` | `DRAFT` | Nutzer klickt „KORRIGIEREN" | Intake wird editierbar |
 | `RESEARCHING` | `RESEARCH_READY` | Research Agent abgeschlossen | — |
@@ -52,11 +52,12 @@ Vollständige Zustands- und Übergangstabelle für MASTER PLAN AI, Stand nach Re
 | `REVIEWING` | `EVALUATING` | Critic abgeschlossen (STATUS OK oder ANMERKUNGEN) | — |
 | `EVALUATING` | `FINALIZING` | Evaluator-Output = `PASS` | — |
 | `EVALUATING` | `REVISION_REQUIRED` | Evaluator-Output = `REVISION_REQUIRED` | `revision_count < MAX_INTERNAL_REVISIONS (2)` |
-| `EVALUATING` | `ESCALATION_REQUIRED` | Evaluator-Output = `REVISION_REQUIRED` | `revision_count >= MAX_INTERNAL_REVISIONS` |
+| `EVALUATING` | `ESCALATION_REQUIRED` | Evaluator-Output = `REVISION_REQUIRED` | `revision_count >= MAX_INTERNAL_REVISIONS`; setzt `escalation_reason = REVISION_LIMIT` |
 | `REVISION_REQUIRED` | `REVISING` | automatisch | — |
 | `REVISING` | `EVALUATING` | Revision Agent abgeschlossen | zurück zum Evaluator, **nicht** zu `REVIEWING` (kein erneuter Critic-Durchlauf) |
-| `ESCALATION_REQUIRED` | `REVISING` | Nutzer trifft Grundsatzentscheidung, wünscht weiteren Versuch | *(neu, Review 1 §1.5)* |
-| `ESCALATION_REQUIRED` | `FINALIZING` | Nutzer akzeptiert Konzept trotz offener Punkte ausdrücklich | *(neu, Review 1 §1.5)*; offene Punkte werden in Final-Builder-Output unter „OFFENE ENTSCHEIDUNGEN" geführt |
+| `ESCALATION_REQUIRED` (`escalation_reason = REVISION_LIMIT`) | `REVISING` | Nutzer trifft Grundsatzentscheidung, wünscht weiteren Versuch am bestehenden Zielkonzept | *(neu, Review 1 §1.5)* |
+| `ESCALATION_REQUIRED` (`escalation_reason = REVISION_LIMIT`) | `FINALIZING` | Nutzer akzeptiert das bestehende Zielkonzept trotz offener Punkte ausdrücklich | *(neu, Review 1 §1.5)*; offene Punkte werden in Final-Builder-Output unter „OFFENE ENTSCHEIDUNGEN" geführt |
+| `ESCALATION_REQUIRED` (`escalation_reason = CLARIFICATION_LIMIT`) | `DRAFT` | Nutzer überarbeitet die Idee grundlegend | *(neu, Nutzer-Review v0.2)*; **nicht** `REVISING`/`FINALIZING` — an diesem Punkt existiert noch kein Zielkonzept, das revidiert oder finalisiert werden könnte, da der Workflow das Verständnis-Gate (Abschnitt 6/7) nie passiert hat; `clarification_round_count` wird auf 0 zurückgesetzt |
 | `FINALIZING` | `COMPLETED` | Final Builder abgeschlossen | — |
 
 ## Technischer Fehlschlag (orthogonal zur obigen Tabelle)
