@@ -135,16 +135,16 @@ Nach der Synthese wird das Zielkonzept dem Nutzer gezeigt. Optionen: ZIELKONZEPT
 
 *(übriger Inhalt wie v0.1)*
 
-## 18. Technische Architektur `[v0.2 — Entscheidungen fixiert, Review 2 §2.1, §2.4, §2.5]`
+## 18. Technische Architektur `[v0.2 — Entscheidungen fixiert, Review 2 §2.1, §2.4, §2.5; Deployment-Topologie korrigiert, ADR-011]`
 
 * Frontend: React, TypeScript
 * Backend: Python, FastAPI
 * Persistenz: SQLite (WAL-Modus, siehe Abschnitt 22)
-* Orchestrierung: OpenClaw
+* Orchestrierung: **OpenClaw — verbindliche Laufzeitkomponente, kein optionales Werkzeug** (ADR-011). Das Backend ruft Modelle ausschließlich über den OpenClaw-Gateway auf (`openclaw-sdk`), nie direkt über einen Modellanbieter-Client.
 * Kommunikation: REST + **Server-Sent Events (SSE)** — WebSocket wird für V1 nicht eingesetzt (ADR-001, Review 2 §2.1 / Review 5 §5.2: kein bidirektionaler Bedarf, SSE genügt für unidirektionale Statusupdates)
-* Deployment: **ein gemeinsam deploybares Artefakt** (FastAPI liefert den gebauten React-Build aus und stellt REST-/SSE-Endpunkte im selben Prozess bereit), zunächst lokal, optional Docker, später Windows-Paket/Installer (ADR-004, Review 2 §2.5)
+* Deployment: **zwei Prozesse** — (1) Frontend+Backend als ein gemeinsam deploybares Artefakt (FastAPI liefert den gebauten React-Build aus und stellt REST-/SSE-Endpunkte im selben Prozess bereit), (2) der OpenClaw-Gateway-Prozess, den das Backend über `openclaw-sdk` anspricht (ADR-004, aktualisiert durch ADR-011). Zunächst lokal, optional Docker (beide Prozesse im selben Compose-Setup), später Windows-Paket/Installer.
 
-Keine Microservices für V1.
+Keine Microservices für V1 — die zwei Prozesse sind Backend und Agent-Runtime, keine feingranulare Serviceaufteilung.
 
 ## 19. Systemkomponenten `[v0.2 — vereinfacht, Review 2 §2.4 / Review 5 §5.1]`
 
@@ -158,9 +158,11 @@ Frontend (React)
 
 „Workflow Orchestrator" und „Audit/Logging" sind für V1 keine eigenen Architekturschichten mehr, sondern Bestandteil von Backend bzw. State Store (Review 2 §2.4, Review 5 §5.1). Der Browser kommuniziert niemals direkt mit dem Modellprovider. API-Schlüssel liegen nur serverseitig.
 
-## 20. Provider-Abstraktion `[v0.2 — Timeout/Retry ergänzt, Review 2 §2.7]`
+## 20. Provider-Abstraktion `[v0.2 — Timeout/Retry ergänzt, Review 2 §2.7; Implementierung über OpenClaw präzisiert, ADR-011]`
 
 Abstrakte Schnittstelle: `call_model(role, model_class, system_prompt, input_context, output_schema, timeout, max_provider_retries)`.
+
+**Implementierung (ADR-011):** `call_model` setzt intern auf `openclaw-sdk` auf — pro Rolle wird ein OpenClaw-Agent angelegt (`AgentConfig` mit `llm_provider`/`llm_model` aus `MODEL_CLASS_MAP`, `system_prompt` aus der jeweiligen Prompt-Datei, ADR-009), Aufrufe laufen über `Agent.execute`. OpenClaw sitzt vor dem Modellanbieter, ersetzt ihn nicht — die Austauschbarkeit aus diesem Abschnitt bleibt erhalten, sie geschieht jetzt über `AgentConfig.llm_provider`/`llm_model` statt über einen direkten Provider-Client.
 
 Modellklassen: LOW, MEDIUM, HIGH. **LOW ist für V1 nicht im Einsatz, aber als Kategorie reserviert** für zukünftige einfache Klassifikationsschritte (z. B. Eingangs-Plausibilitätsfilter) — siehe ADR-006, Review 5 §5.3.
 
@@ -240,9 +242,9 @@ Für V1 als fortlaufende `DECISIONS.md` im Repository statt eigenem Datenmodell 
 
 *(UI-Anzeige und Modellzuordnung wie v0.1, ergänzt:)* Zusätzlich zur Revisionslogik (Abschnitt 16) ein harter, serverseitig unabhängig geprüfter Deckel je Projekt (maximale Gesamtzahl an Modellaufrufen bzw. geschätzten Kosten pro Durchlauf) — greift unabhängig von jeder Workflow-Zählvariable als Verteidigung in der Tiefe.
 
-## 33. OpenClaw-Verantwortung
+## 33. OpenClaw-Verantwortung `[v0.2 — als verbindlich klargestellt, ADR-011]`
 
-*(unverändert gegenüber v0.1)*
+*(Inhalt wie v0.1, mit einer Klarstellung:)* OpenClaw ist ab Phase 1 verbindlich umgesetzt, nicht optional oder erst für spätere Phasen vorgesehen — siehe ADR-011 (Anlass: die erste Phase-1-Implementierung hatte Modellaufrufe versehentlich direkt gegen den Anthropic-Client statt über OpenClaw geführt; korrigiert).
 
 ## 34. Parallelisierung `[v0.2 — Fan-out/Fan-in ergänzt, Review 1 §1.7]`
 

@@ -99,7 +99,7 @@ Falls Tavily hierbei unzureichend abschneidet — insbesondere bei GitHub-/Open-
 **Reason:** V1 ist explizit Single-User/lokal (Abschnitt 37 Nicht-Ziele); zwei separate Prozesse mit CORS-Konfiguration wären unnötige Betriebskomplexität und erschweren die spätere Windows-Paket/Installer-Anforderung.
 **Alternatives:** getrennte Frontend-/Backend-Deployments
 **Trade-off:** etwas weniger Deployment-Flexibilität, für V1 ohne praktische Relevanz.
-**Status:** Accepted (Review 2 §2.5)
+**Status:** **Teilweise durch ADR-011 überholt** — gilt weiterhin für Frontend+Backend (ein Prozess, ein Port), aber der OpenClaw-Gateway kommt als zusätzlicher, separat zu betreibender Prozess hinzu. „Ein gemeinsam deploybares Artefakt" bezieht sich ab ADR-011 nur noch auf Frontend+Backend, nicht auf die gesamte Laufzeitumgebung.
 
 ## ADR-005
 
@@ -148,3 +148,22 @@ Falls Tavily hierbei unzureichend abschneidet — insbesondere bei GitHub-/Open-
 **Alternatives:** separates Logging-System (z. B. strukturierte Log-Dateien, externer Log-Dienst)
 **Trade-off:** keiner erkennbar für V1.
 **Status:** Accepted (Review 2 §2.4, Review 5 §5.1)
+
+## ADR-011
+
+**Decision:** OpenClaw Gateway ist verbindliche Laufzeitkomponente. `call_model` (Abschnitt 20) ruft Modelle ausschließlich über das `openclaw-sdk` (PyPI, `Agent.execute`/`execute_structured` gegen einen laufenden OpenClaw-Gateway-Prozess) auf — **nicht** mehr direkt über den `anthropic`-Python-Client. Damit wird die in der Phase-1-Erstimplementierung entstandene Architekturabweichung (FastAPI → `anthropic.Anthropic()` direkt) rückgängig gemacht.
+
+**Reason:** Der freigegebene Masterplan (Abschnitt 19, 33) sieht OpenClaw ausdrücklich als Agent-Layer zwischen Backend und Modell-/Tool-Aufrufen vor („Agenten-Orchestrierung, ..., Modellaufrufe, strukturierte Agentenoutputs"), nicht als optionales Implementierungswerkzeug. Die erste Phase-1-Implementierung hatte das übergangen, weil in der Umsetzungs-Session kein OpenClaw-Zugriff unmittelbar vorlag — das ist ein Implementierungsversehen, keine bewusste Architekturentscheidung, und wird hiermit korrigiert, statt den Masterplan nachträglich an den Code anzupassen (Nutzerentscheidung, siehe Session-Verlauf: „Nach unserem bisherigen Gespräch war eigentlich A gemeint").
+
+**Technischer Nachweis vor der Entscheidung:** OpenClaw ist ein reales, aktives Open-Source-Projekt (Ende 2025 gestartet, seit Februar 2026 bei OpenAI), kein hypothetisches Konzept. Es betreibt einen selbst gehosteten Gateway-Prozess (Standardport 18789), ansprechbar über WebSocket-RPC oder eine OpenAI-kompatible HTTP-Schnittstelle. Das Community-SDK `openclaw-sdk` (PyPI) wurde installiert und inspiziert: `OpenClawClient.connect(...)` verbindet sich zum Gateway (Auto-Erkennung: `gateway_ws_url` → `openai_base_url` → lokaler Gateway unter `ws://127.0.0.1:18789`), `client.create_agent(AgentConfig(agent_id=..., system_prompt=..., llm_provider="anthropic", llm_model=..., llm_api_key=...))` legt einen Agenten an, `agent.execute_structured(query, output_model=<Pydantic-Modell>)` liefert ein bereits gegen das Schema validiertes Objekt zurück. Wichtig: `AgentConfig.llm_provider`/`llm_model`/`llm_api_key` zeigen, dass OpenClaw **vor** dem eigentlichen Modellanbieter sitzt, ihn nicht ersetzt — Anthropic bleibt der tatsächliche Modellanbieter, per Konfiguration weiterhin austauschbar (Abschnitt 20 bleibt unverändert gültig).
+
+**Alternatives:**
+- **Rohes HTTP gegen die OpenAI-kompatible Gateway-Schnittstelle** (`POST /v1/chat/completions`), ohne SDK. Verworfen: das SDK bietet mit `execute_structured` bereits genau die von `call_model` benötigte Schema-Validierung, ein eigener HTTP-Client hätte das nur redundant nachgebaut.
+- **Masterplan anpassen, OpenClaw aus der Architektur entfernen (Option B aus der Nutzerprüfung).** Verworfen, da es der ausdrücklich bestätigten Absicht widerspricht und das erste Auftreten dieses Punkts ein Implementierungsversehen war, kein neuer Erkenntnisstand über den Plan selbst.
+
+**Trade-off:**
+- **ADR-004 wird revidiert** (siehe dort): „ein gemeinsam deploybares Artefakt" gilt nicht mehr uneingeschränkt — der OpenClaw-Gateway-Prozess ist zusätzlich zum FastAPI/React-Prozess zu betreiben. Für lokale Entwicklung ist das ein zusätzlicher Prozess, kein zusätzlicher Deployment-Host.
+- Agentenkonfiguration (System-Prompt, Modellzuordnung) lebt jetzt teilweise in OpenClaw-Agent-Objekten (`AgentConfig`, einmalig pro Rolle angelegt) statt ausschließlich in unseren eigenen Prompt-Dateien (ADR-009) — die Prompt-**Datei** bleibt die Quelle der Wahrheit für den Prompt-Text (ADR-009 unverändert), sie wird nur beim Anlegen des OpenClaw-Agenten als `system_prompt` übergeben, nicht dupliziert gepflegt.
+- Kein echter OpenClaw-Gateway ist in der Implementierungs-Sandbox lauffähig betreibbar (keine dauerhafte Hintergrund-Dienst-Infrastruktur, keine Messaging-Plattform-Anbindung erforderlich für unseren Zweck) — die Adapter-Schicht (`model_provider.py`) ist gegen die reale SDK-Schnittstelle gebaut und mit Mocks getestet, aber ein Ende-zu-Ende-Test gegen einen tatsächlich laufenden Gateway steht aus (muss der Nutzer in seiner eigenen Umgebung nachholen, siehe `PHASE1_CHECKPOINT.md`).
+
+**Status:** Accepted (Nutzerentscheidung nach technischer Verifikation)
