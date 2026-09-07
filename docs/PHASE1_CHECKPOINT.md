@@ -78,3 +78,36 @@ Kein Test führt einen echten Netzwerkaufruf aus — weder gegen OpenClaw noch g
 Phase 1 gilt hiermit als abgeschlossen **mit den drei oben benannten, expliziten Vorbehalten** (AT-1.2 real-API-Nachweis aussteht, kein Test gegen einen echten OpenClaw-Gateway, AT-1.5-Frontend-Teil nicht anwendbar). Architektur jetzt konsistent mit `MASTER_PLAN_v0.2.md` Abschnitt 19/33 (ADR-011) — Modellaufrufe laufen über OpenClaw, nicht direkt gegen Anthropic. Keine Phase-2-Arbeit begonnen — `research`, `research_sources`, Tavily-Anbindung etc. existieren nicht im Code.
 
 **Vor Beginn von Phase 2:** OpenClaw-Gateway lokal betreiben, `ANTHROPIC_API_KEY` konfigurieren, damit sowohl den AT-1.2-Realdatentest als auch den ausstehenden Ende-zu-Ende-Test gegen den echten Gateway in einem Durchlauf nachholen, dann formale Freigabe für Phase 2 einholen (die laut ADR-003 ohnehin an die dortige 5-Testfälle-Validation gebunden ist).
+
+## Nachprüfung 2026-09-07 vor Phase 2
+
+Die geforderte reale Prüfung wurde gestartet, konnte in der bereitgestellten
+Repository-Sandbox aber **nicht ausgeführt** werden: Port 18789 war weder auf
+localhost noch über die erreichbaren Container-Gateway-Adressen ansprechbar;
+`openclaw` war dort nicht installiert, und Gateway-/Modellprovider-Variablen
+waren nicht in den Prozess injiziert. Es wurden keine Zugangsdaten gelesen oder
+ausgegeben. AT-1.2 und der echte Gateway-E2E-Nachweis bleiben deshalb offen und
+werden nicht als bestanden bezeichnet.
+
+Für AT-1.2 sind diese drei absichtlich unterspezifizierten API-Stichproben
+vorbereitet (jeweils `POST /api/projects`, danach `POST .../submit`):
+
+1. Eine Terminplanungs-App ohne benannte Zielgruppe/Rollen.
+2. Ein lokales Dokumentenarchiv ohne geklärte Datenschutz- und Offline-Grenze.
+3. Eine öffentliche Störungsmeldeplattform ohne Aussage, wer Meldungen prüfen
+   und freigeben darf.
+
+Erwartung: höchstens drei Fragen und ausschließlich zu Zielgruppe/Rollen,
+harten Betriebs-/Datenschutzgrenzen oder grundsätzlichem Freigabeprozess; keine
+Frage nach Technologie, Framework, Datenbank, UI oder Implementierungsdetail.
+
+Die SDK-2.1-Inspektion ergab dabei eine echte Adapterinkompatibilität:
+`OpenClawClient.get_agent()` ist nur eine lokale Proxy-Factory und wirft keinen
+`AgentNotFoundError`; außerdem überträgt `create_agent(AgentConfig)` die dort
+gesetzten Modell-/System-Prompt-Felder nicht an `agents.create`. Die bisherige
+catch/create-Logik war daher wirkungslos. `model_provider.py` adressiert nun
+einen im Gateway vorkonfigurierten Agenten (`MPA_OPENCLAW_AGENT_ID`, optional
+rollenspezifisch), sendet den versionierten Rollenprompt pro Lauf mit und nutzt
+für jeden Lauf eine isolierte Session. Unit-Tests decken Agent-ID, Prompt und
+Session-Isolation ab. Die reale Gateway-Verifikation dieser Korrektur bleibt
+wegen des oben genannten Infrastrukturblockers offen.

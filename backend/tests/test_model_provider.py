@@ -21,14 +21,10 @@ class _DummySchema(BaseModel):
 
 @pytest.fixture(autouse=True)
 def reset_module_state():
-    """_client/_agents sind Modul-Globals mit Cache-Semantik (siehe
-    model_provider.py) - zwischen Tests zurücksetzen, sonst leckt der
-    Mock-Zustand eines Tests in den nächsten."""
+    """Den Client-Cache zwischen Tests zurücksetzen."""
     mp._client = None
-    mp._agents = {}
     yield
     mp._client = None
-    mp._agents = {}
 
 
 def _execution_result(content: str, success: bool = True, error_message: str | None = None):
@@ -59,8 +55,7 @@ def test_call_model_happy_path(monkeypatch):
     )
 
     fake_client = MagicMock()
-    fake_client.get_agent.side_effect = openclaw.AgentNotFoundError("not found")
-    fake_client.create_agent = AsyncMock(return_value=fake_agent)
+    fake_client.get_agent.return_value = fake_agent
     _patch_client(monkeypatch, fake_client)
 
     result = mp.call_model(
@@ -78,37 +73,39 @@ def test_call_model_happy_path(monkeypatch):
     assert result.provider == "anthropic"
     assert result.model == "claude-sonnet-5"
     assert result.estimated_cost_usd > 0
-    fake_client.create_agent.assert_awaited_once()
+    fake_client.get_agent.assert_called_once()
+    assert "<system_instructions>\nsys\n</system_instructions>" in fake_agent.execute.await_args.args[0]
 
 
-def test_call_model_reuses_agent_across_calls(monkeypatch):
+def test_call_model_uses_isolated_sessions_across_calls(monkeypatch):
     fake_agent = MagicMock()
     fake_agent.execute = AsyncMock(return_value=_execution_result('{"value": "x"}'))
 
     fake_client = MagicMock()
-    fake_client.get_agent.side_effect = openclaw.AgentNotFoundError("not found")
-    fake_client.create_agent = AsyncMock(return_value=fake_agent)
+    fake_client.get_agent.return_value = fake_agent
     _patch_client(monkeypatch, fake_client)
 
     mp.call_model("understanding", "MEDIUM", "sys", "ctx1", _DummySchema)
     mp.call_model("understanding", "MEDIUM", "sys", "ctx2", _DummySchema)
 
-    fake_client.create_agent.assert_awaited_once()  # zweiter Aufruf nutzt den gecachten Agenten
+    assert fake_client.get_agent.call_count == 2
+    sessions = [call.kwargs["session_name"] for call in fake_client.get_agent.call_args_list]
+    assert sessions[0] != sessions[1]
     assert fake_agent.execute.await_count == 2
 
 
-def test_call_model_existing_agent_is_reused_via_get_agent(monkeypatch):
+def test_call_model_uses_configured_gateway_agent(monkeypatch):
     fake_agent = MagicMock()
     fake_agent.execute = AsyncMock(return_value=_execution_result('{"value": "x"}'))
 
     fake_client = MagicMock()
-    fake_client.get_agent.return_value = fake_agent  # Agent existiert bereits im Gateway
-    fake_client.create_agent = AsyncMock()
+    fake_client.get_agent.return_value = fake_agent
     _patch_client(monkeypatch, fake_client)
+    monkeypatch.setenv("MPA_OPENCLAW_AGENT_ID_UNDERSTANDING", "configured-understanding")
 
     mp.call_model("understanding", "MEDIUM", "sys", "ctx", _DummySchema)
 
-    fake_client.create_agent.assert_not_awaited()
+    assert fake_client.get_agent.call_args.args[0] == "configured-understanding"
 
 
 def test_call_model_gateway_error_raises_model_provider_error(monkeypatch):

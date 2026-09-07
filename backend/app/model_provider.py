@@ -5,9 +5,8 @@ Modellanbieter-Client. Agenten dürfen laut Abschnitt 20 nicht hart an
 einen einzigen Modellanbieter gekoppelt sein; OpenClaw sitzt vor dem
 Modellanbieter (`AgentConfig.llm_provider`/`llm_model`), ersetzt ihn nicht.
 
-Pro Rolle wird genau ein OpenClaw-Agent angelegt (System-Prompt aus der
-jeweiligen Prompt-Datei, ADR-009) und wiederverwendet - nicht pro Aufruf
-neu erzeugt.
+Pro Rolle wird ein im Gateway vorkonfigurierter Agent adressiert; jeder Aufruf
+nutzt eine isolierte Session und erhält den versionierten System-Prompt.
 """
 from __future__ import annotations
 
@@ -16,6 +15,7 @@ import json
 import os
 import re
 import threading
+import uuid
 from dataclasses import dataclass
 from typing import Type, TypeVar
 
@@ -25,13 +25,13 @@ from pydantic import BaseModel
 from app.config import (
     MODEL_CLASS_MAP,
     MODEL_PROVIDER,
-    MODEL_PROVIDER_API_KEY_ENV_VAR,
     MODEL_PRICING_USD_PER_MTOK,
     MODEL_CALL_TIMEOUT_SECONDS,
     MODEL_CALL_MAX_PROVIDER_RETRIES,
     OPENCLAW_GATEWAY_WS_URL,
     OPENCLAW_OPENAI_BASE_URL,
     OPENCLAW_API_KEY,
+    OPENCLAW_AGENT_ID,
 )
 
 T = TypeVar("T", bound=BaseModel)
@@ -66,8 +66,8 @@ def _estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> flo
 
 # --- OpenClaw-Client/Agent-Lifecycle ----------------------------------------
 #
-# Ein Client, ein Agent pro Rolle, über die Lebensdauer des Prozesses
-# wiederverwendet statt pro Aufruf neu verbunden/angelegt. FastAPI-Router
+# Ein Client über die Lebensdauer des Prozesses; jeder Lauf erhält eine eigene
+# Gateway-Session, damit kein Gesprächskontext zwischen Runs durchsickert. FastAPI-Router
 # sind synchron (Abschnitt 27 baut auf der bestehenden, getesteten
 # Sync-Signatur von call_model auf) - die async openclaw-sdk-Aufrufe
 # laufen daher in einem dedizierten Hintergrund-Event-Loop, den dieses
@@ -78,7 +78,6 @@ _loop_thread: threading.Thread | None = None
 _loop_init_lock = threading.Lock()  # schützt nur das einmalige Starten des Hintergrund-Loops
 
 _client: openclaw.OpenClawClient | None = None
-_agents: dict[tuple[str, str], "openclaw.Agent"] = {}
 _init_lock: asyncio.Lock | None = None  # asyncio.Lock, NICHT threading.Lock - siehe unten
 
 
@@ -128,42 +127,22 @@ async def _get_client() -> "openclaw.OpenClawClient":
 
 
 async def _get_agent(role: str, model_class: str, system_prompt: str) -> "openclaw.Agent":
-    """Legt pro (role, model_class) genau einen OpenClaw-Agenten an und cacht
-    ihn - NICHT hinter einem Lock ausgeführt, der auch die eigentliche
-    Ausführung (agent.execute) blockiert: Architect und Challenger müssen ab
-    Phase 3 parallel laufen können (Abschnitt 34, Review 1 §1.7); ein Lock um
-    den gesamten Aufruf statt nur um die Erstanlage würde das serialisieren."""
-    key = (role, model_class)
-    if key in _agents:
-        return _agents[key]
+    """Erzeugt einen Session-isolierten Proxy auf einen existierenden Agenten.
 
-    model = MODEL_CLASS_MAP.get(model_class)
-    if not model:
+    `OpenClawClient.get_agent()` ist im SDK eine rein lokale Factory und wirft
+    keinen AgentNotFoundError. Die frühere catch/create-Logik wurde deshalb nie
+    ausgeführt. Zudem ignoriert `create_agent(AgentConfig)` in SDK 2.1 die
+    llm-/system_prompt-Felder beim Gateway-RPC. Agenten werden folglich im
+    Gateway konfiguriert; der Prompt wird pro Lauf explizit mitgesendet.
+    """
+    if model_class not in MODEL_CLASS_MAP:
         raise ModelProviderError(f"Unbekannte Modellklasse: {model_class!r}")
 
     client = await _get_client()
-    agent_id = f"masterplan-{role}"
-
-    async with _get_init_lock():
-        if key in _agents:  # zwischenzeitlich von einer anderen Coroutine angelegt
-            return _agents[key]
-        try:
-            agent = client.get_agent(agent_id)
-        except openclaw.AgentNotFoundError:
-            agent = await client.create_agent(
-                openclaw.AgentConfig(
-                    agent_id=agent_id,
-                    name=f"MASTER PLAN AI - {role}",
-                    system_prompt=system_prompt,
-                    llm_provider=MODEL_PROVIDER,
-                    llm_model=model,
-                    llm_api_key=os.environ.get(MODEL_PROVIDER_API_KEY_ENV_VAR),
-                    channels=[],
-                    enable_memory=False,  # jeder Aufruf ist ein eigenständiger Agentenlauf (Abschnitt 22/23)
-                )
-            )
-        _agents[key] = agent
-    return agent
+    env_name = f"MPA_OPENCLAW_AGENT_ID_{role.upper()}"
+    agent_id = os.environ.get(env_name, OPENCLAW_AGENT_ID)
+    session_name = f"masterplan-{role}-{uuid.uuid4().hex}"
+    return client.get_agent(agent_id, session_name=session_name)
 
 
 # --- Strukturierte Ausgabe ---------------------------------------------------
@@ -211,7 +190,13 @@ async def _call_model_async(
     timeout: float,
 ) -> ModelCallResult:
     agent = await _get_agent(role, model_class, system_prompt)
-    query = input_context + _schema_prompt(output_schema)
+    query = (
+        "<system_instructions>\n"
+        + system_prompt
+        + "\n</system_instructions>\n\n"
+        + input_context
+        + _schema_prompt(output_schema)
+    )
 
     try:
         result: openclaw.ExecutionResult = await agent.execute(
