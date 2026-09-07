@@ -95,11 +95,40 @@ Code-Review gegen AT-2.1–AT-2.4 und SECURITY §3:
   modellkonforme Agenten für `understanding` und `research`; ein Regressionstest
   deckt die fehlende Rollenkonfiguration ab.
 
+## Abschluss 2026-09-07 (real, außerhalb jeder Sandbox — auf dem Server des Nutzers)
+
+Alle in den vorigen Abschnitten als sandbox-bedingt offen markierten Punkte
+wurden direkt auf dem Server des Nutzers nachgeholt, mit dessen echtem
+`.venv`, echtem laufendem OpenClaw-Gateway und echten dedizierten Agenten:
+
+* `python3 -m pytest tests/ -v`: **28 von 28 bestanden**, keine Regression.
+* Echter Gateway-E2E-Nachweis (`scripts/verify_gateway_e2e.py`): **bestanden**
+  — siehe `PHASE1_CHECKPOINT.md` Abschnitt „Abschluss 2026-09-07" für die
+  vollständigen Ergebniswerte und die drei dabei gefundenen und umgangenen
+  `openclaw-sdk`-2.1.0-Bugs (Request-Payload-Form, Antwort-Textauswertung,
+  fehlende Token-Auswertung — alle drei in `app/model_provider.py`
+  dokumentiert und durch dedizierte Tests abgesichert).
+* ADR-003/AT-2.3: bereits zuvor real validiert (Commit `5a21da3`), unverändert
+  bestanden.
+
+**Weiterhin offen, klar abgegrenzt:**
+
+* Frontend-Build (`npm install && npm run build`) wurde auf dem Server des
+  Nutzers zwar begonnen und ein realer Versionsfehler in `package.json`
+  gefunden und behoben (Commit `ca8e26d`, `rehype-sanitize`/`typescript`
+  zeigten auf nicht existente npm-Versionen) — der Build wurde nach dem Fix
+  aber noch nicht erneut bestätigt durchlaufen. Letzter offener technischer
+  Punkt vor vollständiger Phase-2-Freigabe.
+* AT-1.2s inhaltliche Prüfung (≤3 passende Rückfragen, keine Technik-/
+  Framework-Fragen) über die drei vorbereiteten Testfälle im echten
+  `/api/projects`-Workflow — technisch jetzt uneingeschränkt möglich, aber
+  noch nicht durchgeführt.
+
 ## CHECKPOINT
 
-Phase 2 ist implementiert und ADR-003/AT-2.3 ist real validiert, aber aus Sicht
-dieses Abschlusslaufs noch **nicht vollständig freigabereif**. Offen bleiben
-der echte OpenClaw-/AT-1.2-Lauf sowie der Frontend-Build; beide konnten wegen
-der beschriebenen Toolchain-Lücken nicht ausgeführt werden. Auch die aktuelle
-Testsuite konnte hier nicht erneut gestartet werden. Die endgültige Freigabe
-bleibt beim Nutzer/Claude-Code-Review.
+Phase 2 ist implementiert, getestet (28/28) und der reale OpenClaw-Gateway-
+E2E-Nachweis ist erbracht. ADR-003/AT-2.3 ist real validiert. Vor
+vollständiger Freigabe fehlen nur noch zwei kleine, klar umrissene und rein
+bestätigende Schritte (Frontend-Build-Bestätigung, AT-1.2-Inhaltsprüfung) —
+keine offenen Architektur- oder Infrastrukturfragen mehr. Die endgültige
+Freigabe bleibt beim Nutzer/Claude-Code-Review.

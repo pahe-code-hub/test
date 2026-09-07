@@ -131,3 +131,48 @@ dass `ModelCallResult.model` beim realen Lauf `claude-sonnet-5` ausweist.
 Damit bleiben der echte Gateway-E2E-Nachweis und AT-1.2 in dieser Umgebung
 weiterhin **BLOCKED**. Die vorbereiteten drei unterspezifizierten API-Fälle
 wurden nicht erneut als vermeintlich reale Modellstichprobe ausgegeben.
+
+## Abschluss 2026-09-07 (real erfolgreich, außerhalb der Sandbox)
+
+`backend/scripts/verify_gateway_e2e.py` wurde vom Nutzer direkt auf seinem
+eigenen Server (echtes `.venv`, echter laufender OpenClaw-Gateway, echter
+`TAVILY_API_KEY`/`ANTHROPIC`-Modellzugriff über die dedizierten Agenten
+`mpa-understanding`/`mpa-research`) ausgeführt. Dabei wurden drei echte,
+zuvor unbekannte Fehler in `openclaw-sdk` 2.1.0 gefunden und gezielt
+umgangen (Details/Code in `app/model_provider.py`, README):
+
+1. `Agent._build_send_params()` liefert das WS-RPC-Payload
+   (`sessionKey`/`message`/`idempotencyKey`/`timeoutMs`); die einzige ohne
+   Geräte-Pairing nutzbare OpenAI-kompatible HTTP-Bridge
+   (`POST /v1/responses`) verlangt aber strikt `model`/`input` und lehnt
+   jedes andere Feld ab.
+2. Der HTTP-Zweig von `Agent._execute_impl()` sucht den Antworttext nur
+   unter `content`/`text`/`message` auf oberster Ebene, `/v1/responses`
+   liefert ihn aber unter `output[].content[].text`.
+3. Derselbe HTTP-Zweig wertet `usage` nicht aus.
+
+Nach den entsprechenden Workarounds (Commits `9f8cf18`..`a929947`) lief der
+reale Test erfolgreich durch:
+
+```
+{"status": "OK", "role": "understanding", "model": "claude-sonnet-5", "input_tokens": 17883, "output_tokens": 193, "estimated_cost_usd": 0.037696, "latency_ms": 8096.2, "result": {"antwort": "gateway-ok"}}
+{"status": "OK", "role": "research", "model": "claude-sonnet-5", "input_tokens": 17881, "output_tokens": 355, "estimated_cost_usd": 0.039312, "latency_ms": 6837.7, "result": {"antwort": "gateway-ok"}}
+```
+
+Damit ist der **echte Gateway-E2E-Nachweis erbracht**: `call_model()` erreicht
+über den echten OpenClaw-Gateway einen dedizierten, korrekt konfigurierten
+Agenten, `ModelCallResult.model` weist tatsächlich `claude-sonnet-5` aus (kein
+`"main"`-Fallback, kein falsch deklariertes Modell), Token-/Kostenwerte sind
+real und plausibel.
+
+**AT-1.2 bleibt teilweise offen**, klar abgegrenzt: Dieser Testlauf beweist
+die technische Erreichbarkeit (Frage: kommt `call_model()` durch den echten
+Gateway zum echten Modell und zurück?), **nicht** die inhaltliche
+Prompt-Treue (Frage: stellt `understanding_v1` bei einem echten, absichtlich
+unterspezifizierten Projekt tatsächlich ≤3 passende Fragen, keine zu Technik/
+Framework/UI?). Dafür fehlt weiterhin ein Durchlauf der drei oben
+vorbereiteten Testfälle über den echten `/api/projects`-Workflow mit
+anschließender manueller Prüfung der zurückgegebenen Fragen — technisch jetzt
+trivial (Infrastruktur steht), aber nicht mehr Teil dieses
+Session-Blockers und daher nicht mehr auf dem kritischen Pfad zur
+Phase-2-Freigabe.
