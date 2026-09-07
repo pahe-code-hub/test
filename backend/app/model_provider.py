@@ -233,7 +233,16 @@ async def _call_model_async(
         )
     except (openclaw.GatewayError, openclaw.APIConnectionError, openclaw.APITimeoutError,
             openclaw.AgentExecutionError, openclaw.RateLimitError, openclaw.AuthenticationError) as exc:
-        raise ModelProviderError(f"{role}: OpenClaw-Gateway-Fehler: {exc}") from exc
+        # `str(exc)` allein zeigt nur die generische Nachricht (z. B. "Gateway
+        # returned HTTP 400 for chat.send") - die eigentliche Fehlerursache
+        # steckt in `exc.details` (u. a. bei GatewayError der geparste
+        # Response-Body), wird von OpenClawError.__str__ aber nicht mit
+        # ausgegeben. Ohne das hier anzuhängen, ist jeder Gateway-Fehler
+        # praktisch nicht diagnostizierbar.
+        details = getattr(exc, "details", None)
+        raise ModelProviderError(
+            f"{role}: OpenClaw-Gateway-Fehler: {exc}" + (f" | details={details}" if details else "")
+        ) from exc
 
     if not result.success:
         raise ModelProviderError(f"{role}: Agentenlauf nicht erfolgreich: {result.error_message}")
