@@ -13,8 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Project, Intake, Understanding, AgentRun
+from app.models import Project, Intake, Understanding, Research, ResearchSource, AgentRun
 from app.model_provider import call_model, ModelProviderError
+from app.research_provider import TavilyResearchProvider, ResearchProviderError
+from app.external_data import wrap_external_research_data
 from app.security import redact_secrets
 from app.schemas import (
     ProjectCreate,
@@ -24,6 +26,10 @@ from app.schemas import (
     IntakeOut,
     UnderstandingOut,
     UnderstandingOutput,
+    ResearchOutput,
+    ResearchOut,
+    ResearchSourceOut,
+    ResearchRerun,
     ClarificationAnswer,
     EscalationResolve,
 )
@@ -34,17 +40,27 @@ from app.state_machine import (
     WAITING_FOR_USER_CONFIRMATION,
     ESCALATION_REQUIRED,
     RESEARCHING,
+    WAITING_FOR_RESEARCH_APPROVAL,
+    GENERATING_SOLUTIONS,
     CLARIFICATION_LIMIT,
     InvalidTransitionError,
     require_state,
     require_escalation_reason,
     clarification_limit_reached,
 )
-from app.config import PROMPTS_DIR, MAX_MODEL_CALLS_PER_PROJECT, MAX_ESTIMATED_COST_PER_PROJECT_USD
+from app.config import (
+    PROMPTS_DIR, MAX_MODEL_CALLS_PER_PROJECT,
+    MAX_ESTIMATED_COST_PER_PROJECT_USD, RESEARCH_MAX_SOURCES,
+)
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 UNDERSTANDING_PROMPT = (PROMPTS_DIR / "understanding_v1.md").read_text(encoding="utf-8")
+RESEARCH_PROMPT = (PROMPTS_DIR / "research_v1.md").read_text(encoding="utf-8")
+
+
+def _research_provider():
+    return TavilyResearchProvider()
 
 
 def _now() -> str:
@@ -190,6 +206,112 @@ def _run_understanding_agent(db: Session, project: Project) -> AgentRun:
     return run
 
 
+def _run_research_agent(db: Session, project: Project, comment: str | None = None) -> AgentRun:
+    """Search → Auswahl → Extract → research_v1, atomar persistiert."""
+    _check_cost_ceiling(project)
+    intake = db.get(Intake, project.id)
+    understanding = db.get(Understanding, project.id)
+    attempts = db.query(AgentRun).filter(
+        AgentRun.project_id == project.id, AgentRun.role == "research"
+    ).count()
+    run = AgentRun(
+        project_id=project.id, role="research", attempt=attempts + 1,
+        status="RUNNING", started_at=_now(), model_class="MEDIUM",
+        prompt_id="research_v1",
+    )
+    db.add(run)
+    db.flush()
+
+    try:
+        provider = _research_provider()
+        requirements = _build_understanding_input(intake)
+        if comment:
+            requirements += f"\nANMERKUNG ZUR NEUEN RECHERCHE: {comment}\n"
+        policy = "Offizielle Dokumentation, Standards und offizielle Repositories priorisieren."
+        queries = (
+            f"bestehende Softwarelösungen für {intake.goal}",
+            f"open source GitHub {intake.goal} {intake.core_features}",
+            f"offizielle Dokumentation Best Practices {intake.problem}",
+        )
+        hits_by_url = {}
+        for query in queries:
+            for hit in provider.search(query, requirements, policy):
+                hits_by_url.setdefault(hit.url, hit)
+        selected_urls = list(hits_by_url)[:RESEARCH_MAX_SOURCES]
+        pages = provider.extract(selected_urls)
+        pages_by_url = {page.url: page for page in pages}
+        if not pages_by_url:
+            raise ResearchProviderError("Tavily Extract lieferte keine verwertbare Quelle")
+
+        external = [
+            {
+                "url": page.url,
+                "title": hits_by_url[page.url].title if page.url in hits_by_url else page.url,
+                "search_snippet": hits_by_url[page.url].snippet if page.url in hits_by_url else "",
+                "content": page.content,
+            }
+            for page in pages
+        ]
+        context = (
+            requirements
+            + "\nBESTÄTIGTES VERSTÄNDNIS: "
+            + (understanding.summary or "")
+            + "\n\n"
+            + wrap_external_research_data(external)
+        )
+        result = call_model(
+            role="research", model_class="MEDIUM", system_prompt=RESEARCH_PROMPT,
+            input_context=context, output_schema=ResearchOutput,
+        )
+        output = result.parsed
+        extracted_urls = set(pages_by_url)
+        finding_urls = {source.url for source in output.sources}
+        if not finding_urls <= extracted_urls:
+            raise ModelProviderError("research_v1 referenziert eine nicht extrahierte Quelle")
+        if any(not set(solution.source_urls) <= finding_urls for solution in output.solutions):
+            raise ModelProviderError("research_v1 lieferte eine Lösung ohne extrahierten Quellenbeleg")
+
+        research = db.get(Research, project.id) or Research(project_id=project.id)
+        db.add(research)
+        research.solutions = json.dumps([x.model_dump() for x in output.solutions], ensure_ascii=False)
+        research.best_practices = json.dumps(output.best_practices, ensure_ascii=False)
+        research.open_source_potential = output.open_source_potential
+        research.conclusion = output.conclusion
+        research.approved_at = None
+        for source in output.sources:
+            page = pages_by_url[source.url]
+            db.add(ResearchSource(
+                project_id=project.id, agent_run_id=run.id, url=source.url,
+                title=(hits_by_url[source.url].title if source.url in hits_by_url else source.title),
+                relevance=source.relevance, confidence=source.confidence,
+                license_info=source.license_info, retrieved_at=page.retrieved_at,
+                provider="tavily",
+            ))
+
+        run.status = "DONE"
+        run.finished_at = _now()
+        run.provider = result.provider
+        run.model = result.model
+        run.token_usage_input = result.input_tokens
+        run.token_usage_output = result.output_tokens
+        run.estimated_cost_usd = result.estimated_cost_usd
+        project.total_model_calls += 1
+        project.total_estimated_cost_usd += result.estimated_cost_usd
+        project.workflow_state = (
+            WAITING_FOR_RESEARCH_APPROVAL
+            if project.research_gate_enabled else GENERATING_SOLUTIONS
+        )
+        project.updated_at = _now()
+    except (ResearchProviderError, ModelProviderError) as exc:
+        run.status = "FAILED"
+        run.finished_at = _now()
+        run.error = redact_secrets(str(exc))
+        project.workflow_state = RESEARCHING
+
+    db.commit()
+    return run
+
+
 def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
     intake = db.get(Intake, project.id)
     understanding = db.get(Understanding, project.id)
@@ -205,6 +327,31 @@ def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
             confirmed_at=understanding.confirmed_at,
         )
 
+    research_out = None
+    research = db.get(Research, project.id)
+    latest_research_run = (
+        db.query(AgentRun)
+        .filter(AgentRun.project_id == project.id, AgentRun.role == "research", AgentRun.status == "DONE")
+        .order_by(AgentRun.started_at.desc()).first()
+    )
+    if research is not None and latest_research_run is not None:
+        sources = db.query(ResearchSource).filter(
+            ResearchSource.agent_run_id == latest_research_run.id
+        ).all()
+        research_out = ResearchOut(
+            solutions=json.loads(research.solutions),
+            best_practices=json.loads(research.best_practices),
+            open_source_potential=research.open_source_potential,
+            conclusion=research.conclusion,
+            approved_at=research.approved_at,
+            sources=[ResearchSourceOut(
+                id=s.id, url=s.url, title=s.title, finding=s.finding,
+                relevance=s.relevance, confidence=s.confidence,
+                license_info=s.license_info, retrieved_at=s.retrieved_at,
+                provider=s.provider,
+            ) for s in sources],
+        )
+
     return ProjectDetail(
         id=project.id,
         title=project.title,
@@ -213,6 +360,7 @@ def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
         created_at=project.created_at,
         updated_at=project.updated_at,
         clarification_round_count=project.clarification_round_count,
+        research_gate_enabled=bool(project.research_gate_enabled),
         total_model_calls=project.total_model_calls,
         total_estimated_cost_usd=project.total_estimated_cost_usd,
         intake=IntakeOut(
@@ -225,6 +373,7 @@ def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
             updated_at=intake.updated_at,
         ),
         understanding=understanding_out,
+        research=research_out,
         last_run_status=last_run.status if last_run else None,
     )
 
@@ -317,11 +466,11 @@ def confirm_understanding(project_id: str, db: Session = Depends(get_db)):
 
     understanding = db.get(Understanding, project_id)
     understanding.confirmed_at = _now()
-    # Ziel-State gemäß WORKFLOW_STATES.md - Research Agent selbst ist Phase 2,
-    # das Projekt "parkt" hier bis Phase 2 implementiert ist.
     project.workflow_state = RESEARCHING
     project.updated_at = _now()
     db.commit()
+    _run_research_agent(db, project)
+    db.refresh(project)
     return _to_project_detail(db, project)
 
 
@@ -399,6 +548,35 @@ def resolve_escalation(project_id: str, payload: EscalationResolve, db: Session 
     return _to_project_detail(db, project)
 
 
+@router.post("/{project_id}/research/approve", response_model=ProjectDetail)
+def approve_research(project_id: str, db: Session = Depends(get_db)):
+    project = _get_project_or_404(db, project_id)
+    try:
+        require_state(project, WAITING_FOR_RESEARCH_APPROVAL)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail={"error": {"code": "INVALID_STATE", "message": str(exc)}})
+    research = db.get(Research, project_id)
+    research.approved_at = _now()
+    project.workflow_state = GENERATING_SOLUTIONS
+    project.updated_at = _now()
+    db.commit()
+    return _to_project_detail(db, project)
+
+
+@router.post("/{project_id}/research/rerun", response_model=ProjectDetail)
+def rerun_research(project_id: str, payload: ResearchRerun, db: Session = Depends(get_db)):
+    project = _get_project_or_404(db, project_id)
+    try:
+        require_state(project, WAITING_FOR_RESEARCH_APPROVAL)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail={"error": {"code": "INVALID_STATE", "message": str(exc)}})
+    project.workflow_state = RESEARCHING
+    db.commit()
+    _run_research_agent(db, project, payload.comment)
+    db.refresh(project)
+    return _to_project_detail(db, project)
+
+
 @router.post("/{project_id}/retry", response_model=ProjectDetail)
 def retry_last_step(project_id: str, db: Session = Depends(get_db)):
     project = _get_project_or_404(db, project_id)
@@ -414,4 +592,9 @@ def retry_last_step(project_id: str, db: Session = Depends(get_db)):
         db.refresh(project)
         return _to_project_detail(db, project)
 
-    raise HTTPException(status_code=409, detail={"error": {"code": "UNSUPPORTED_ROLE", "message": "Retry für diese Rolle ist in Phase 1 nicht implementiert"}})
+    if last_run.role == "research":
+        _run_research_agent(db, project)
+        db.refresh(project)
+        return _to_project_detail(db, project)
+
+    raise HTTPException(status_code=409, detail={"error": {"code": "UNSUPPORTED_ROLE", "message": "Retry für diese Rolle ist noch nicht implementiert"}})
