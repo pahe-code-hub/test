@@ -160,22 +160,42 @@ def test_call_model_unknown_model_class_raises_model_provider_error(monkeypatch)
         mp.call_model("understanding", "EXTREME", "sys", "ctx", _DummySchema)
 
 
-def test_agent_build_send_params_includes_model_for_openai_compat_bridge():
+def test_agent_build_send_params_rebuilds_payload_for_openai_compat_bridge():
     """Regressionstest für den openclaw-sdk-2.1.0-Patch in model_provider.py.
 
-    `Agent._build_send_params()` liefert im unveränderten SDK weder `model`
-    noch `input`, sondern nur das WS-RPC-Feld `message`. Die OpenAI-
-    kompatible HTTP-Bridge (`POST /v1/responses`) lehnt Requests ohne `model`
-    mit HTTP 400 ab und meldet ohne `input` "input: Invalid input" (beides
-    real gegen einen laufenden Gateway verifiziert, siehe
-    docs/PHASE2_CHECKPOINT.md). Dieser Test bricht, falls der Patch in
-    model_provider.py entfernt oder von einer SDK-Aktualisierung überschrieben
-    wird, ohne dass ein Ersatz existiert.
+    `Agent._build_send_params()` liefert im unveränderten SDK das WS-RPC-
+    Format (`sessionKey`, `message`, `idempotencyKey`, `timeoutMs`). Die
+    OpenAI-kompatible HTTP-Bridge (`POST /v1/responses`) validiert strikt:
+    ohne `model` HTTP 400 "Invalid model", ohne `input` "input: Invalid
+    input", und mit den WS-RPC-Feldern zusätzlich "Unrecognized keys" (alle
+    drei real gegen einen laufenden Gateway verifiziert, siehe
+    docs/PHASE2_CHECKPOINT.md). Für diesen Transport muss das Payload daher
+    komplett neu gebaut werden. Dieser Test bricht, falls der Patch entfernt
+    oder von einer SDK-Aktualisierung überschrieben wird, ohne dass ein
+    Ersatz existiert.
     """
+    from openclaw_sdk.gateway.openai_compat import OpenAICompatGateway
+
     fake_client = MagicMock()
+    fake_client.gateway = MagicMock(spec=OpenAICompatGateway)
     agent = openclaw.Agent(fake_client, agent_id="mpa-understanding", session_name="s1")
 
     params = agent._build_send_params("hallo", None, "idem-1")
 
-    assert params["model"] == "openclaw/mpa-understanding"
-    assert params["input"] == "hallo"
+    assert params == {"model": "openclaw/mpa-understanding", "input": "hallo"}
+
+
+def test_agent_build_send_params_unchanged_for_raw_websocket_gateway():
+    """Der WS-/Local-Gateway-Pfad darf vom HTTP-Bridge-Workaround nicht
+    betroffen sein - dort funktioniert das originale `sessionKey`-basierte
+    Payload bereits (verifiziert vor Einführung des Workarounds)."""
+    fake_client = MagicMock()
+    fake_client.gateway = MagicMock()  # kein OpenAICompatGateway
+    agent = openclaw.Agent(fake_client, agent_id="mpa-understanding", session_name="s1")
+
+    params = agent._build_send_params("hallo", None, "idem-1")
+
+    assert params["sessionKey"] == "agent:mpa-understanding:s1"
+    assert params["message"] == "hallo"
+    assert "model" not in params
+    assert "input" not in params

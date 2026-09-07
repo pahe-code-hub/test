@@ -135,21 +135,33 @@ async def _get_client() -> "openclaw.OpenClawClient":
 # `params` aber unverändert als JSON-Body an `POST /v1/responses` weiter,
 # ohne jede Feldnamen-Übersetzung - und dieser REST-Endpunkt (der einzige Weg
 # ohne Geräte-Pairing/Ed25519-Signatur, das für die aktuelle OpenClaw-CLI-
-# Version keinen Erzeugungsbefehl hat) erwartet `model` und `input`, nicht
-# `message`. Ohne Korrektur: HTTP 400 "input: Invalid input" (real gegen
-# einen laufenden Gateway verifiziert - siehe PHASE2_CHECKPOINT.md). Dieser
-# Patch ergänzt beide Felder, sofern nicht bereits gesetzt; `message` bleibt
-# zusätzlich erhalten, falls ein künftiger WS-Aufruf es noch braucht. Nur
-# einmal pro Prozess anwenden (Re-Import-sicher).
+# Version keinen Erzeugungsbefehl hat) validiert das Payload strikt: er
+# erwartet ausschließlich `model`/`input` und lehnt jedes unbekannte Feld ab
+# (real verifiziert: erst "input: Invalid input" nach reinem Ergänzen von
+# `model`, dann "Unrecognized keys: sessionKey, message, idempotencyKey,
+# timeoutMs" nach zusätzlichem Ergänzen von `input` - siehe
+# PHASE2_CHECKPOINT.md). Für die HTTP-Bridge muss das Payload deshalb neu
+# gebaut werden, nicht nur ergänzt. Der rohe WS-Pfad bleibt unverändert.
+#
+# Einschränkung: `options.attachments` wird über die HTTP-Bridge nicht
+# unterstützt (in Phase 1/2 ungenutzt, da alle Rollen reinen Text senden) -
+# ein Aufruf mit Anhängen schlägt bewusst hart fehl statt sie still zu
+# verwerfen. Nur einmal pro Prozess anwenden (Re-Import-sicher).
 if not getattr(openclaw.Agent, "_mpa_model_field_patch_applied", False):
+    from openclaw_sdk.gateway.openai_compat import OpenAICompatGateway as _OpenAICompatGateway
+
     _original_build_send_params = openclaw.Agent._build_send_params
 
     def _build_send_params_with_model(self, query, options, idempotency_key):
-        params = _original_build_send_params(self, query, options, idempotency_key)
-        params.setdefault("model", f"openclaw/{self.agent_id}")
-        if "message" in params:
-            params.setdefault("input", params["message"])
-        return params
+        gateway = getattr(self._client, "gateway", None)
+        if isinstance(gateway, _OpenAICompatGateway):
+            if options and options.attachments:
+                raise ModelProviderError(
+                    f"{self.agent_id}: Anhänge werden über die OpenAI-kompatible "
+                    "HTTP-Bridge (openclaw-sdk-Workaround) nicht unterstützt"
+                )
+            return {"model": f"openclaw/{self.agent_id}", "input": query}
+        return _original_build_send_params(self, query, options, idempotency_key)
 
     openclaw.Agent._build_send_params = _build_send_params_with_model
     openclaw.Agent._mpa_model_field_patch_applied = True
