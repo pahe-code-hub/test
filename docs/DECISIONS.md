@@ -22,7 +22,7 @@ Format je Eintrag: Decision, Reason, Alternatives, Trade-off, Status. Fortlaufen
 
 ## ADR-003 — Research-/Retrieval-Provider für V1
 
-**Status:** ACCEPTED (gemeinsam entschieden, unter Testvorbehalt — siehe Validation)
+**Status:** ACCEPTED — real validiert am 2026-09-07 (siehe Validation), eine dokumentierte Einschränkung bei `vendor_docs`
 
 ### Decision
 
@@ -93,27 +93,61 @@ Bewertet werden: Relevanz, Quellenqualität, Aktualität, Vollständigkeit, Extr
 
 Falls Tavily hierbei unzureichend abschneidet — insbesondere bei GitHub-/Open-Source-Recherche — ist Exa der erste alternative Provider-Kandidat.
 
-### Validation attempt 2026-09-07
+### Validation attempt 2026-09-07 (Sandbox, BLOCKED)
 
-Die Validation wurde mit `backend/scripts/validate_adr003.py` gestartet. Der
-Lauf endete vor dem ersten Request mit `BLOCKED`, weil in der bereitgestellten
-Repository-Sandbox kein `TAVILY_API_KEY` konfiguriert war; DNS-/Netzzugriff war
-dort ebenfalls nicht verfügbar. Es wurden keine Zugangsdaten ausgegeben.
+Ein erster Versuch mit `backend/scripts/validate_adr003.py` in der damaligen
+Implementierungs-Sandbox endete vor dem ersten Request mit `BLOCKED`, weil dort
+kein `TAVILY_API_KEY` konfiguriert war und kein DNS-/Netzzugriff bestand. Es
+wurden keine Zugangsdaten ausgegeben; alle Werte in der ursprünglichen Tabelle
+waren `BLOCKED`, 0 Credits verbraucht.
+
+### Validation result 2026-09-07 (real, außerhalb der Sandbox)
+
+Selber Lauf, diesmal mit echtem `TAVILY_API_KEY` direkt auf dem Zielserver des
+Nutzers (nachweislich echter Internetzugang), also außerhalb der
+netzisolierten Coding-Sandbox. `PYTHONPATH=. python3 scripts/validate_adr003.py`,
+Exit-Code 0, `status: EXECUTED_NEEDS_HUMAN_SCORING`. Alle 5 Aufgaben lieferten
+reale Search- und Extract-Ergebnisse (10 Rohtreffer je Standardsuche, 4–5
+erfolgreiche Extractions je Aufgabe). `human_scores_1_to_5` wurden vom Nutzer
+anhand der tatsächlich zurückgegebenen Quell-URLs geprüft und freigegeben:
 
 | Reale Aufgabe | Relevanz | Quellenqualität | Aktualität | Vollständigkeit | Extraktionsqualität | Kosten | Laufzeit |
 |---|---|---|---|---|---|---|---|
-| Bestehende Terminplanungssoftware für kleine Teams | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | 0 Credits (kein Request) | n/a |
-| Aktiv gepflegtes GitHub-Dokumentenmanagement mit OCR und Lizenz | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | 0 Credits | n/a |
-| FastAPI/SSE-Framework- und Library-Recherche | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | 0 Credits | n/a |
-| Offizielle Anthropic-Dokumentation zu Structured Outputs | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | 0 Credits | n/a |
-| Aktuelle OWASP-Best-Practices gegen LLM Prompt Injection (2026) | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | 0 Credits | n/a |
+| Bestehende Terminplanungssoftware für kleine Teams | 3 | 2 | 3 | 3 | 4 | 2 Credits | 1,27 s |
+| Aktiv gepflegtes GitHub-Dokumentenmanagement mit OCR und Lizenz | 4 | 4 | 4 | 4 | 4 | 2 Credits | 0,37 s |
+| FastAPI/SSE-Framework- und Library-Recherche | 5 | 5 | 4 | 4 | 5 | 2 Credits | 1,89 s |
+| Offizielle Anthropic-Dokumentation zu Structured Outputs | 2 | 2 | 3 | 2 | 4 | 2 Credits | 2,05 s |
+| Aktuelle OWASP-Best-Practices gegen LLM Prompt Injection (2026) | 5 | 5 | 4 | 4 | 5 | 2 Credits | 1,62 s |
 
-Damit ist AT-2.3 **nicht bestanden** und der Testvorbehalt dieses ADR bleibt
-offen. Exa wurde nicht aufgerufen: Der vereinbarte Trigger ist ein nachgewiesen
-schwaches Tavily-Ergebnis bei GitHub/Open Source; ohne einen Tavily-Lauf lässt
-sich diese Aussage nicht seriös treffen. Nach Bereitstellung der externen
-Infrastruktur ist das Skript erneut auszuführen, die fünf `human_scores_1_to_5`
-zu bewerten und bei einem schwachen GitHub-Fall Exa unmittelbar zu vergleichen.
+Details je Aufgabe:
+
+* **general_software** — nur Vergleichs-/Marketing-Blogs (u. a. eine
+  themenfremde Lokalnachrichtenseite als Quelle); für eine Marktübersicht
+  brauchbar, aber keine Primärquellen.
+* **github_open_source** — findet echte `github.com/topics/...`-Seiten direkt,
+  ergänzt um Vergleichsblogs; kein schwaches Ergebnis, der in Abschnitt
+  "Validation" vereinbarte Exa-Trigger (schwaches GitHub-Ergebnis) greift
+  **nicht**.
+* **framework** — trifft die offizielle FastAPI-Doku direkt
+  (`fastapi.tiangolo.com/tutorial/server-sent-events`).
+* **vendor_docs** — **Schwachstelle:** keine der 5 Quellen ist
+  `docs.anthropic.com`/offizielle Anthropic-Doku; nur Drittanbieter-Blogs, ein
+  GitHub-Issue, ein Hacker-News-Thread. Tavily hat hier die naheliegende
+  Primärquelle verfehlt.
+* **current_best_practice** — trifft `owasp.org` direkt (Top-10-LLM-Projekt
+  und den Prompt-Injection-Artikel).
+
+**Ergebnis:** AT-2.3 ist **bestanden** — Tavily liefert bei 4 von 5
+Kategorien relevante, teils offizielle Quellen; nur bei `vendor_docs` wird die
+offizielle Herstellerdokumentation nicht gefunden. Der vereinbarte
+Exa-Auslöser (schwaches GitHub/Open-Source-Ergebnis) trat nicht ein, ein
+Wechsel ist damit nicht angezeigt. Die `vendor_docs`-Schwäche wird stattdessen
+im Research-Agent-Prompt (`AGENT_PROMPTS.md`) kompensiert: Bei bekannter
+Hersteller-Domain (z. B. Anthropic, FastAPI, OWASP) soll die Suchanfrage eine
+`site:`-Einschränkung auf die bekannte offizielle Domain vorsehen, bevor eine
+freie Suche versucht wird. Der Testvorbehalt dieses ADR ist damit
+geschlossen; ADR-003 gilt als real validiert, nicht mehr nur unter Vorbehalt
+angenommen.
 
 ## ADR-004
 
