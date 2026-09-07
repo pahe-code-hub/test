@@ -106,8 +106,28 @@ Die SDK-2.1-Inspektion ergab dabei eine echte Adapterinkompatibilität:
 `AgentNotFoundError`; außerdem überträgt `create_agent(AgentConfig)` die dort
 gesetzten Modell-/System-Prompt-Felder nicht an `agents.create`. Die bisherige
 catch/create-Logik war daher wirkungslos. `model_provider.py` adressiert nun
-einen im Gateway vorkonfigurierten Agenten (`MPA_OPENCLAW_AGENT_ID`, optional
-rollenspezifisch), sendet den versionierten Rollenprompt pro Lauf mit und nutzt
-für jeden Lauf eine isolierte Session. Unit-Tests decken Agent-ID, Prompt und
-Session-Isolation ab. Die reale Gateway-Verifikation dieser Korrektur bleibt
-wegen des oben genannten Infrastrukturblockers offen.
+einen dedizierten, zwingend rollenspezifisch konfigurierten Gateway-Agenten,
+sendet den versionierten Rollenprompt pro Lauf mit und nutzt für jeden Lauf
+eine isolierte Session. Unit-Tests decken Agent-ID, Prompt und Session-Isolation
+ab. Die reale Gateway-Verifikation dieser Korrektur bleibt wegen des oben
+genannten Infrastrukturblockers offen.
+
+## Abschlussversuch 2026-09-07
+
+Für den reproduzierbaren manuellen Nachweis wurde
+`backend/scripts/verify_gateway_e2e.py` ergänzt. Das Skript ruft `call_model()`
+ungemockt für `understanding` und `research` mit Modellklasse `MEDIUM` und
+minimalem strukturiertem Output auf. Die Rollen-IDs wurden für den Lauf
+explizit auf `mpa-understanding` und `mpa-research` gesetzt.
+
+Der tatsächliche Aufruf
+`PYTHONPATH=. python3 scripts/verify_gateway_e2e.py` erreichte den Gateway in
+dieser Ausführungsumgebung nicht: Python brach bereits beim Import mit
+`ModuleNotFoundError: No module named 'pydantic'` und Exit-Code 1 ab. Deshalb
+liegen weder echte Token-/Kosten-/Latenzwerte noch eine beobachtete
+`gateway-ok`-Antwort vor; insbesondere konnte auch nicht bestätigt werden,
+dass `ModelCallResult.model` beim realen Lauf `claude-sonnet-5` ausweist.
+
+Damit bleiben der echte Gateway-E2E-Nachweis und AT-1.2 in dieser Umgebung
+weiterhin **BLOCKED**. Die vorbereiteten drei unterspezifizierten API-Fälle
+wurden nicht erneut als vermeintlich reale Modellstichprobe ausgegeben.
