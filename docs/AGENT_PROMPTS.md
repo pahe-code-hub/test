@@ -62,7 +62,8 @@ Recherchiere, ob vergleichbare Produkte, Open-Source-Projekte, Frameworks, Refer
       "interesting": "string — was ist daran interessant",
       "reusable": "string — was können wir übernehmen",
       "fit": "JA | TEILWEISE | NEIN",
-      "constraint": "string — wichtige Einschränkung"
+      "constraint": "string — wichtige Einschränkung",
+      "source_urls": ["string — mindestens eine tatsächlich extrahierte URL"]
     }
   ],
   "best_practices": ["string", "..."],
@@ -75,13 +76,16 @@ Recherchiere, ob vergleichbare Produkte, Open-Source-Projekte, Frameworks, Refer
       "finding": "string",
       "relevance": "number 0-1 | null",
       "confidence": "number 0-1 | null",
-      "license_info": "string | null",
-      "retrieved_at": "ISO-8601 timestamp — vom extract-Aufruf, nicht vom Modell gesetzt"
+      "license_info": "string | null"
     }
   ]
 }
 ```
-`solutions` maximal 3–5 Einträge (Abschnitt 8). Jede `url` in `sources` muss aus einem tatsächlichen `search`/`extract`-Aufruf stammen (`DATA_MODEL.md` Tabelle `research_sources`).
+`solutions` enthält 3–5 Einträge (Abschnitt 8). Jede `url` in `sources` und
+`source_urls` muss aus einem tatsächlichen `search`/`extract`-Aufruf stammen
+(`DATA_MODEL.md` Tabelle `research_sources`). `retrieved_at` ist bewusst kein
+Modellfeld: Das Backend ergänzt den unmittelbar nach dem Extract-Response
+erfassten Zeitstempel erst bei der Persistierung.
 
 ---
 

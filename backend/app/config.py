@@ -66,3 +66,9 @@ MAX_ESTIMATED_COST_PER_PROJECT_USD = float(
 
 # --- Prompt-Versionierung (ADR-009) ----------------------------------------
 PROMPTS_DIR = BASE_DIR / "prompts"
+
+# --- Research Provider (ADR-003, Phase 2) ---------------------------------
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY") or None
+TAVILY_BASE_URL = os.environ.get("MPA_TAVILY_BASE_URL", "https://api.tavily.com")
+RESEARCH_TIMEOUT_SECONDS = float(os.environ.get("MPA_RESEARCH_TIMEOUT_SECONDS", "30"))
+RESEARCH_MAX_SOURCES = int(os.environ.get("MPA_RESEARCH_MAX_SOURCES", "8"))

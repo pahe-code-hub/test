@@ -27,6 +27,32 @@ class UnderstandingOutput(BaseModel):
     contradiction_note: Optional[str] = None
 
 
+class ResearchSolution(BaseModel):
+    name: str
+    interesting: str
+    reusable: str
+    fit: str = Field(pattern="^(JA|TEILWEISE|NEIN)$")
+    constraint: str
+    source_urls: list[str] = Field(min_length=1)
+
+
+class ResearchFinding(BaseModel):
+    url: str
+    title: str
+    finding: str
+    relevance: Optional[float] = Field(None, ge=0, le=1)
+    confidence: Optional[float] = Field(None, ge=0, le=1)
+    license_info: Optional[str] = None
+
+
+class ResearchOutput(BaseModel):
+    solutions: list[ResearchSolution] = Field(min_length=3, max_length=5)
+    best_practices: list[str]
+    open_source_potential: str
+    conclusion: str
+    sources: list[ResearchFinding] = Field(min_length=1)
+
+
 # --- API: Intake (Abschnitt 3) ---------------------------------------------
 
 
@@ -80,6 +106,21 @@ class UnderstandingOut(BaseModel):
     confirmed_at: Optional[str] = None
 
 
+class ResearchSourceOut(ResearchFinding):
+    id: str
+    retrieved_at: str
+    provider: str
+
+
+class ResearchOut(BaseModel):
+    solutions: list[ResearchSolution]
+    best_practices: list[str]
+    open_source_potential: str
+    conclusion: str
+    approved_at: Optional[str] = None
+    sources: list[ResearchSourceOut]
+
+
 class ProjectDetail(BaseModel):
     id: str
     title: str
@@ -88,11 +129,17 @@ class ProjectDetail(BaseModel):
     created_at: str
     updated_at: str
     clarification_round_count: int
+    research_gate_enabled: bool
     total_model_calls: int
     total_estimated_cost_usd: float
     intake: IntakeOut
     understanding: Optional[UnderstandingOut] = None
+    research: Optional[ResearchOut] = None
     last_run_status: Optional[str] = None
+
+
+class ResearchRerun(BaseModel):
+    comment: Optional[str] = Field(None, max_length=4000)
 
 
 class ClarificationAnswer(BaseModel):

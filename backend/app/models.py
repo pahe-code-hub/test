@@ -1,9 +1,9 @@
 """
 ORM-Modelle für Phase 1 (DATA_MODEL.md): projects, intake,
-understanding, agent_runs. Weitere Tabellen (research, architect,
-challenger, synthesis, critic, evaluations, revisions, final,
-research_sources) sind bewusst NICHT hier definiert - sie gehören zu
-späteren Phasen (Phase 2-6) und werden erst dort ergänzt, um keine
+understanding, research, research_sources, agent_runs. Weitere Tabellen
+(architect, challenger, synthesis, critic, evaluations, revisions, final)
+werden bewusst NICHT hier definiert - sie gehören zu den Phasen 3-6 und
+werden erst dort ergänzt, um keine
 Phasen vorwegzunehmen.
 """
 import uuid
@@ -71,8 +71,36 @@ class Understanding(Base):
     confirmed_at = Column(String, nullable=True)
 
 
+class Research(Base):
+    __tablename__ = "research"
+
+    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+    solutions = Column(Text, nullable=False)
+    best_practices = Column(Text, nullable=False)
+    open_source_potential = Column(Text, nullable=False)
+    conclusion = Column(Text, nullable=False)
+    approved_at = Column(String, nullable=True)
+
+
+class ResearchSource(Base):
+    __tablename__ = "research_sources"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    agent_run_id = Column(String, ForeignKey("agent_runs.id"), nullable=False)
+    url = Column(Text, nullable=False)
+    title = Column(Text, nullable=False)
+    finding = Column(Text, nullable=False)
+    relevance = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
+    license_info = Column(Text, nullable=True)
+    retrieved_at = Column(String, nullable=False)
+    provider = Column(String, nullable=False)
+    referenced_by_synthesis = Column(Integer, nullable=False, default=0)
+
+
 class AgentRun(Base):
-    """Audit- und Fortschritts-Tabelle (ADR-010) - für Phase 1 nur role='understanding'."""
+    """Audit- und Fortschritts-Tabelle (ADR-010)."""
 
     __tablename__ = "agent_runs"
 
