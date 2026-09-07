@@ -125,24 +125,30 @@ async def _get_client() -> "openclaw.OpenClawClient":
     return _client
 
 
-# --- Workaround für openclaw-sdk 2.1.0: fehlendes `model`-Feld -------------
+# --- Workaround für openclaw-sdk 2.1.0: `chat.send`-Payload passt nicht ----
+# --- zur OpenAI-kompatiblen HTTP-Bridge -------------------------------------
 #
-# `Agent._build_send_params()` baut das `chat.send`-Payload ohne `model`-Feld
-# (verifiziert im SDK-Quellcode, nicht vermutet). Der rohe WebSocket-Gateway-
-# Pfad (`ProtocolGateway`/`LocalGateway`) toleriert das, weil er das Modell
-# serverseitig aus dem in `sessionKey` enthaltenen `agent_id` auflöst. Die
-# OpenAI-kompatible HTTP-Bridge (`POST /v1/responses`, per ADR-011-Ergänzung
-# der einzige Weg, der ohne Geräte-Pairing/Ed25519-Signatur auskommt) verlangt
-# dagegen zwingend ein `model`-Feld im Request-Body und lehnt sonst mit
-# HTTP 400 ab. Dieser Patch ergänzt es, sofern nicht bereits gesetzt, im
-# vom SDK selbst dokumentierten Format `openclaw/<agentId>`. Nur einmal pro
-# Prozess anwenden (Re-Import-sicher).
+# `Agent._build_send_params()` baut das `chat.send`-Payload im WS-RPC-Format
+# des Gateways (`sessionKey`, `message`, `idempotencyKey`, `timeoutMs`) - so
+# verifiziert im SDK-Quellcode. Der rohe WebSocket-Pfad (`ProtocolGateway`/
+# `LocalGateway`) kommt damit klar. `OpenAICompatGateway.call()` leitet
+# `params` aber unverändert als JSON-Body an `POST /v1/responses` weiter,
+# ohne jede Feldnamen-Übersetzung - und dieser REST-Endpunkt (der einzige Weg
+# ohne Geräte-Pairing/Ed25519-Signatur, das für die aktuelle OpenClaw-CLI-
+# Version keinen Erzeugungsbefehl hat) erwartet `model` und `input`, nicht
+# `message`. Ohne Korrektur: HTTP 400 "input: Invalid input" (real gegen
+# einen laufenden Gateway verifiziert - siehe PHASE2_CHECKPOINT.md). Dieser
+# Patch ergänzt beide Felder, sofern nicht bereits gesetzt; `message` bleibt
+# zusätzlich erhalten, falls ein künftiger WS-Aufruf es noch braucht. Nur
+# einmal pro Prozess anwenden (Re-Import-sicher).
 if not getattr(openclaw.Agent, "_mpa_model_field_patch_applied", False):
     _original_build_send_params = openclaw.Agent._build_send_params
 
     def _build_send_params_with_model(self, query, options, idempotency_key):
         params = _original_build_send_params(self, query, options, idempotency_key)
         params.setdefault("model", f"openclaw/{self.agent_id}")
+        if "message" in params:
+            params.setdefault("input", params["message"])
         return params
 
     openclaw.Agent._build_send_params = _build_send_params_with_model

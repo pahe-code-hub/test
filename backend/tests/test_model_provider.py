@@ -163,10 +163,12 @@ def test_call_model_unknown_model_class_raises_model_provider_error(monkeypatch)
 def test_agent_build_send_params_includes_model_for_openai_compat_bridge():
     """Regressionstest für den openclaw-sdk-2.1.0-Patch in model_provider.py.
 
-    `Agent._build_send_params()` liefert im unveränderten SDK kein `model`-
-    Feld; die OpenAI-kompatible HTTP-Bridge (`POST /v1/responses`) lehnt
-    Requests ohne dieses Feld mit HTTP 400 ab (real gegen einen laufenden
-    Gateway verifiziert). Dieser Test bricht, falls der Patch in
+    `Agent._build_send_params()` liefert im unveränderten SDK weder `model`
+    noch `input`, sondern nur das WS-RPC-Feld `message`. Die OpenAI-
+    kompatible HTTP-Bridge (`POST /v1/responses`) lehnt Requests ohne `model`
+    mit HTTP 400 ab und meldet ohne `input` "input: Invalid input" (beides
+    real gegen einen laufenden Gateway verifiziert, siehe
+    docs/PHASE2_CHECKPOINT.md). Dieser Test bricht, falls der Patch in
     model_provider.py entfernt oder von einer SDK-Aktualisierung überschrieben
     wird, ohne dass ein Ersatz existiert.
     """
@@ -176,3 +178,4 @@ def test_agent_build_send_params_includes_model_for_openai_compat_bridge():
     params = agent._build_send_params("hallo", None, "idem-1")
 
     assert params["model"] == "openclaw/mpa-understanding"
+    assert params["input"] == "hallo"
