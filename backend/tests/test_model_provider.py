@@ -158,3 +158,21 @@ def test_call_model_unknown_model_class_raises_model_provider_error(monkeypatch)
 
     with pytest.raises(mp.ModelProviderError):
         mp.call_model("understanding", "EXTREME", "sys", "ctx", _DummySchema)
+
+
+def test_agent_build_send_params_includes_model_for_openai_compat_bridge():
+    """Regressionstest für den openclaw-sdk-2.1.0-Patch in model_provider.py.
+
+    `Agent._build_send_params()` liefert im unveränderten SDK kein `model`-
+    Feld; die OpenAI-kompatible HTTP-Bridge (`POST /v1/responses`) lehnt
+    Requests ohne dieses Feld mit HTTP 400 ab (real gegen einen laufenden
+    Gateway verifiziert). Dieser Test bricht, falls der Patch in
+    model_provider.py entfernt oder von einer SDK-Aktualisierung überschrieben
+    wird, ohne dass ein Ersatz existiert.
+    """
+    fake_client = MagicMock()
+    agent = openclaw.Agent(fake_client, agent_id="mpa-understanding", session_name="s1")
+
+    params = agent._build_send_params("hallo", None, "idem-1")
+
+    assert params["model"] == "openclaw/mpa-understanding"

@@ -125,6 +125,30 @@ async def _get_client() -> "openclaw.OpenClawClient":
     return _client
 
 
+# --- Workaround für openclaw-sdk 2.1.0: fehlendes `model`-Feld -------------
+#
+# `Agent._build_send_params()` baut das `chat.send`-Payload ohne `model`-Feld
+# (verifiziert im SDK-Quellcode, nicht vermutet). Der rohe WebSocket-Gateway-
+# Pfad (`ProtocolGateway`/`LocalGateway`) toleriert das, weil er das Modell
+# serverseitig aus dem in `sessionKey` enthaltenen `agent_id` auflöst. Die
+# OpenAI-kompatible HTTP-Bridge (`POST /v1/responses`, per ADR-011-Ergänzung
+# der einzige Weg, der ohne Geräte-Pairing/Ed25519-Signatur auskommt) verlangt
+# dagegen zwingend ein `model`-Feld im Request-Body und lehnt sonst mit
+# HTTP 400 ab. Dieser Patch ergänzt es, sofern nicht bereits gesetzt, im
+# vom SDK selbst dokumentierten Format `openclaw/<agentId>`. Nur einmal pro
+# Prozess anwenden (Re-Import-sicher).
+if not getattr(openclaw.Agent, "_mpa_model_field_patch_applied", False):
+    _original_build_send_params = openclaw.Agent._build_send_params
+
+    def _build_send_params_with_model(self, query, options, idempotency_key):
+        params = _original_build_send_params(self, query, options, idempotency_key)
+        params.setdefault("model", f"openclaw/{self.agent_id}")
+        return params
+
+    openclaw.Agent._build_send_params = _build_send_params_with_model
+    openclaw.Agent._mpa_model_field_patch_applied = True
+
+
 async def _get_agent(role: str, model_class: str, system_prompt: str) -> "openclaw.Agent":
     """Erzeugt einen Session-isolierten Proxy auf einen existierenden Agenten.
 

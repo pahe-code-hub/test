@@ -17,12 +17,26 @@ export ANTHROPIC_API_KEY=sk-ant-...
 export TAVILY_API_KEY=...              # nur serverseitig; Search + Extract
 
 # Der OpenClaw-Gateway-Prozess muss separat laufen (eigener Prozess, ADR-011/
-# ADR-004). Siehe https://docs.openclaw.ai für Installation/Betrieb. Ohne
-# MPA_OPENCLAW_GATEWAY_WS_URL/MPA_OPENCLAW_OPENAI_BASE_URL versucht
-# openclaw-sdk automatisch einen lokalen Gateway unter ws://127.0.0.1:18789
-# zu finden (siehe OpenClawClient.connect-Verhalten in app/model_provider.py).
-# export MPA_OPENCLAW_GATEWAY_WS_URL=ws://127.0.0.1:18789
-# export MPA_OPENCLAW_API_KEY=...        # falls der Gateway Auth verlangt
+# ADR-004). Siehe https://docs.openclaw.ai für Installation/Betrieb.
+#
+# WICHTIG: den rohen WebSocket-Pfad (MPA_OPENCLAW_GATEWAY_WS_URL bzw. die
+# Auto-Erkennung ohne jede Konfiguration) NICHT verwenden - der verlangt ein
+# per Ed25519 signiertes Geräte-Zertifikat unter ~/.openclaw/identity/, für
+# das es in aktuellen OpenClaw-CLI-Versionen keinen Befehl zur lokalen
+# Erzeugung gibt (nur Node-/Fremdgeräte-Pairing über `openclaw connect`).
+# Stattdessen die OpenAI-kompatible HTTP-Bridge des Gateways verwenden:
+#
+# 1. Auf dem Gateway die benötigten Endpunkte aktivieren (standardmäßig aus)
+#    und den Gateway neu starten:
+#      openclaw config set gateway.http.endpoints.chatCompletions.enabled true
+#      openclaw config set gateway.http.endpoints.responses.enabled true
+#      openclaw gateway restart
+#
+# 2. Base-URL und den bereits vorhandenen Gateway-Token verwenden (Token
+#    steht in ~/.openclaw/openclaw.json unter gateway.auth.token, NICHT hier
+#    reinkopieren, sondern per Skript/Secret-Manager auslesen):
+export MPA_OPENCLAW_OPENAI_BASE_URL=http://127.0.0.1:18789
+export MPA_OPENCLAW_API_KEY=...        # aus gateway.auth.token
 
 # Dedizierte MASTER-PLAN-AI-Agenten anlegen. Beim Anlegen für beide Rollen
 # das Modell konfigurieren, das MODEL_CLASS_MAP["MEDIUM"] entspricht
@@ -44,7 +58,7 @@ dedizierten Gateway-Agenten mit `MODEL_PROVIDER` und der jeweiligen
 `MODEL_CLASS_MAP`-Zuordnung übereinstimmen; nur dann sind Audit- und Kostendaten
 korrekt.
 
-**Wichtiger Vorbehalt (siehe `docs/PHASE1_CHECKPOINT.md`):** In der Implementierungs-Sandbox dieser Session stand kein laufender OpenClaw-Gateway zur Verfügung. Die Adapter-Schicht (`app/model_provider.py`) ist gegen die reale `openclaw-sdk`-Schnittstelle gebaut und mit Mocks getestet (`tests/test_model_provider.py`), aber **nicht** Ende-zu-Ende gegen einen echten, laufenden Gateway verifiziert. Das muss vor Produktivbetrieb nachgeholt werden.
+**Bekannter openclaw-sdk-2.1.0-Bug (workaround bereits enthalten):** `Agent._build_send_params()` setzt im unveränderten SDK kein `model`-Feld im `chat.send`-Payload. Der rohe WebSocket-Pfad toleriert das (Modellauflösung serverseitig über `sessionKey`), die OpenAI-kompatible HTTP-Bridge lehnt den Request ohne `model` mit HTTP 400 ab. `app/model_provider.py` patcht `Agent._build_send_params` deshalb beim Import, um `model: "openclaw/<agentId>"` zu ergänzen (siehe Kommentar dort, `tests/test_model_provider.py::test_agent_build_send_params_includes_model_for_openai_compat_bridge`). Bei einem openclaw-sdk-Update prüfen, ob der Fix upstream vorhanden ist, und den Patch dann entfernen.
 
 ## Starten
 
