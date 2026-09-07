@@ -283,6 +283,7 @@ def _run_research_agent(db: Session, project: Project, comment: str | None = Non
             db.add(ResearchSource(
                 project_id=project.id, agent_run_id=run.id, url=source.url,
                 title=(hits_by_url[source.url].title if source.url in hits_by_url else source.title),
+                finding=source.finding,
                 relevance=source.relevance, confidence=source.confidence,
                 license_info=source.license_info, retrieved_at=page.retrieved_at,
                 provider="tavily",

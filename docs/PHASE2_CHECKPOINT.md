@@ -74,6 +74,9 @@ Code-Review gegen AT-2.1–AT-2.4 und SECURITY §3:
   Wrapper eingebettet. Keine Phase-3-Prompts oder -Agenten wurden angelegt.
 * Frühere Research-Quellen bleiben über `agent_run_id` auditierbar; die API
   zeigt nur Quellen des neuesten erfolgreichen Research-Laufs.
+* Im abschließenden Review wurde ein fehlendes Mapping von
+  `ResearchFinding.finding` auf die gleichnamige `NOT NULL`-Spalte entdeckt
+  und vor dem Checkpoint korrigiert; ein Regression-Assert prüft den Wert.
 
 ## CHECKPOINT
 

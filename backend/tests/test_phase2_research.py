@@ -63,6 +63,7 @@ def test_research_persists_extract_timestamp_and_gate(client):
     assert body["workflow_state"] == "WAITING_FOR_RESEARCH_APPROVAL"
     assert len(body["research"]["solutions"]) == 3
     assert body["research"]["sources"][0]["retrieved_at"] == "2026-09-07T06:00:00+00:00"
+    assert body["research"]["sources"][0]["finding"] == "MIT-lizenziertes Werkzeug"
     approved = client.post(f"/api/projects/{project_id}/research/approve")
     assert approved.json()["workflow_state"] == "GENERATING_SOLUTIONS"
 
