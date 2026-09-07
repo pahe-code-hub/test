@@ -1,6 +1,8 @@
-# MASTER PLAN AI — Backend (Phase 1)
+# MASTER PLAN AI — Backend (Phase 1 + 2)
 
-Implementiert ausschließlich **Phase 1 — Workflow-Kern** aus `MASTER_PLAN_v0.2.md` Abschnitt 35, freigegeben auf Commit `360b24d`. Kein Research, kein Architect/Challenger, keine Synthese, keine spätere Phase — siehe `docs/PHASE1_CHECKPOINT.md` für den vollständigen Nachweis gegen `ACCEPTANCE_TESTS.md`.
+Implementiert Phase 1 (Workflow-Kern) und Phase 2 (Research) aus
+`MASTER_PLAN_v0.2.md` Abschnitt 35. Keine Phase-3-Agenten oder spätere Rollen.
+Siehe `docs/PHASE1_CHECKPOINT.md` und `docs/PHASE2_CHECKPOINT.md`.
 
 Modellaufrufe laufen ausschließlich über den **OpenClaw-Gateway** (`openclaw-sdk`), nie direkt gegen einen Modellanbieter-Client (ADR-011) — siehe `docs/DECISIONS.md` ADR-011 zur Begründung dieser Korrektur gegenüber der ersten Phase-1-Implementierung.
 
@@ -12,6 +14,7 @@ pip install -r requirements.txt
 
 # Der Modellanbieter, den OpenClaw für jeden Agenten aufruft (Abschnitt 20/33):
 export ANTHROPIC_API_KEY=sk-ant-...
+export TAVILY_API_KEY=...              # nur serverseitig; Search + Extract
 
 # Der OpenClaw-Gateway-Prozess muss separat laufen (eigener Prozess, ADR-011/
 # ADR-004). Siehe https://docs.openclaw.ai für Installation/Betrieb. Ohne

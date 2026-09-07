@@ -93,6 +93,28 @@ Bewertet werden: Relevanz, Quellenqualität, Aktualität, Vollständigkeit, Extr
 
 Falls Tavily hierbei unzureichend abschneidet — insbesondere bei GitHub-/Open-Source-Recherche — ist Exa der erste alternative Provider-Kandidat.
 
+### Validation attempt 2026-09-07
+
+Die Validation wurde mit `backend/scripts/validate_adr003.py` gestartet. Der
+Lauf endete vor dem ersten Request mit `BLOCKED`, weil in der bereitgestellten
+Repository-Sandbox kein `TAVILY_API_KEY` konfiguriert war; DNS-/Netzzugriff war
+dort ebenfalls nicht verfügbar. Es wurden keine Zugangsdaten ausgegeben.
+
+| Reale Aufgabe | Relevanz | Quellenqualität | Aktualität | Vollständigkeit | Extraktionsqualität | Kosten | Laufzeit |
+|---|---|---|---|---|---|---|---|
+| Bestehende Terminplanungssoftware für kleine Teams | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | 0 Credits (kein Request) | n/a |
+| Aktiv gepflegtes GitHub-Dokumentenmanagement mit OCR und Lizenz | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | 0 Credits | n/a |
+| FastAPI/SSE-Framework- und Library-Recherche | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | 0 Credits | n/a |
+| Offizielle Anthropic-Dokumentation zu Structured Outputs | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | 0 Credits | n/a |
+| Aktuelle OWASP-Best-Practices gegen LLM Prompt Injection (2026) | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | 0 Credits | n/a |
+
+Damit ist AT-2.3 **nicht bestanden** und der Testvorbehalt dieses ADR bleibt
+offen. Exa wurde nicht aufgerufen: Der vereinbarte Trigger ist ein nachgewiesen
+schwaches Tavily-Ergebnis bei GitHub/Open Source; ohne einen Tavily-Lauf lässt
+sich diese Aussage nicht seriös treffen. Nach Bereitstellung der externen
+Infrastruktur ist das Skript erneut auszuführen, die fünf `human_scores_1_to_5`
+zu bewerten und bei einem schwachen GitHub-Fall Exa unmittelbar zu vergleichen.
+
 ## ADR-004
 
 **Decision:** Frontend und Backend als ein gemeinsam deploybares Artefakt (ein Prozess, ein Port) statt zweier getrennter Dienste
