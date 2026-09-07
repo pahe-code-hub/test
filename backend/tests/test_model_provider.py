@@ -199,3 +199,57 @@ def test_agent_build_send_params_unchanged_for_raw_websocket_gateway():
     assert params["message"] == "hallo"
     assert "model" not in params
     assert "input" not in params
+
+
+def test_call_model_over_openai_compat_bridge_end_to_end(monkeypatch):
+    """End-to-End-Test für den kompletten HTTP-Bridge-Workaround in
+    call_model() gegen die reale `/v1/responses`-Antwortform (unverändert
+    aus einem echten Gateway-Aufruf übernommen, siehe
+    docs/PHASE2_CHECKPOINT.md) - nicht nur den Request-Payload wie die
+    beiden Tests oben, sondern auch die Antwort-Auswertung inklusive
+    Token-Nutzung, die `Agent.execute()` für diesen Transport falsch bzw.
+    gar nicht liefert."""
+    from openclaw_sdk.gateway.openai_compat import OpenAICompatGateway
+
+    real_responses_api_payload = {
+        "id": "resp_548c9ea8-6f6f-43cb-8d1e-d06e5ce66cea",
+        "object": "response",
+        "status": "completed",
+        "model": "openclaw/test-understanding",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": '```json\n{"value": "hallo"}\n```'}],
+            "status": "completed",
+        }],
+        "usage": {"input_tokens": 17692, "output_tokens": 8},
+    }
+
+    fake_client = MagicMock()
+    fake_client.gateway = MagicMock(spec=OpenAICompatGateway)
+    fake_client.gateway.call = AsyncMock(return_value=real_responses_api_payload)
+    fake_client.get_agent = MagicMock(
+        side_effect=lambda agent_id, session_name: openclaw.Agent(
+            fake_client, agent_id=agent_id, session_name=session_name
+        )
+    )
+    _patch_client(monkeypatch, fake_client)
+
+    result = mp.call_model(
+        role="understanding",
+        model_class="MEDIUM",
+        system_prompt="sys",
+        input_context="ctx",
+        output_schema=_DummySchema,
+    )
+
+    assert result.parsed.value == "hallo"
+    assert result.input_tokens == 17692
+    assert result.output_tokens == 8
+    assert result.model == "claude-sonnet-5"
+
+    call_args = fake_client.gateway.call.call_args
+    sent_params = call_args.args[1]
+    assert call_args.args[0] == "chat.send"
+    assert sent_params["model"] == "openclaw/test-understanding"
+    assert set(sent_params.keys()) == {"model", "input"}

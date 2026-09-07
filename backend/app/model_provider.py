@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Type, TypeVar
 
 import openclaw_sdk as openclaw
+from openclaw_sdk.gateway.openai_compat import OpenAICompatGateway as _OpenAICompatGateway
 from pydantic import BaseModel
 
 from app.config import (
@@ -148,8 +149,6 @@ async def _get_client() -> "openclaw.OpenClawClient":
 # ein Aufruf mit Anhängen schlägt bewusst hart fehl statt sie still zu
 # verwerfen. Nur einmal pro Prozess anwenden (Re-Import-sicher).
 if not getattr(openclaw.Agent, "_mpa_model_field_patch_applied", False):
-    from openclaw_sdk.gateway.openai_compat import OpenAICompatGateway as _OpenAICompatGateway
-
     _original_build_send_params = openclaw.Agent._build_send_params
 
     def _build_send_params_with_model(self, query, options, idempotency_key):
@@ -228,6 +227,48 @@ def _parse_json_response(text: str, schema: Type[T]) -> T:
         raise ModelProviderError(f"Antwort entspricht nicht dem Schema {schema.__name__}: {exc}") from exc
 
 
+# --- Workaround für openclaw-sdk 2.1.0 (Fortsetzung): kaputte HTTP-Antwort- -
+# --- Auswertung in Agent._execute_impl() ------------------------------------
+#
+# `Agent.execute()` ruft intern `_execute_impl()` auf. Deren HTTP-Zweig
+# ("HTTP-only path: result comes back in the send response", Zeile ~950 in
+# openclaw_sdk.core.agent) sucht den Antworttext nur unter den Top-Level-
+# Schlüsseln `content`/`text`/`message` und wertet `usage` überhaupt nicht
+# aus. `POST /v1/responses` liefert den Text aber verschachtelt unter
+# `output[].content[].text` (OpenAI-Responses-API-Form) - das Ergebnis ist
+# ein leerer String und `token_usage=None`, real verifiziert (siehe
+# PHASE2_CHECKPOINT.md). Diesen internen Zweig zu patchen wäre invasiver als
+# die vorherigen zwei Patches (er verarbeitet auch den WS-Event-Strom in
+# derselben Funktion); stattdessen umgeht `call_model` `Agent.execute()` für
+# die HTTP-Bridge komplett und wertet die reale `/v1/responses`-Antwort
+# selbst aus. Der rohe WS-/Local-Gateway-Pfad bleibt bei `agent.execute()`.
+async def _call_via_openai_compat_bridge(
+    agent: "openclaw.Agent", query: str, timeout: float
+) -> tuple[str, int, int]:
+    params = agent._build_send_params(query, None, uuid.uuid4().hex)
+    raw = await agent._client.gateway.call("chat.send", params, timeout=timeout)
+
+    status = raw.get("status")
+    if status not in (None, "completed"):
+        raise ModelProviderError(
+            f"{agent.agent_id}: Agentenlauf nicht erfolgreich (status={status!r})"
+        )
+
+    text_parts: list[str] = []
+    for item in raw.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        for block in item.get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "output_text":
+                text_parts.append(block.get("text", ""))
+    content = "".join(text_parts)
+
+    usage = raw.get("usage") or {}
+    input_tokens = int(usage.get("input_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or 0)
+    return content, input_tokens, output_tokens
+
+
 async def _call_model_async(
     role: str,
     model_class: str,
@@ -245,10 +286,24 @@ async def _call_model_async(
         + _schema_prompt(output_schema)
     )
 
+    is_openai_compat = isinstance(getattr(agent._client, "gateway", None), _OpenAICompatGateway)
+
     try:
-        result: openclaw.ExecutionResult = await agent.execute(
-            query, options=openclaw.ExecutionOptions(timeout_seconds=int(timeout))
-        )
+        if is_openai_compat:
+            content, input_tokens, output_tokens = await _call_via_openai_compat_bridge(
+                agent, query, timeout
+            )
+        else:
+            result: openclaw.ExecutionResult = await agent.execute(
+                query, options=openclaw.ExecutionOptions(timeout_seconds=int(timeout))
+            )
+            if not result.success:
+                raise ModelProviderError(
+                    f"{role}: Agentenlauf nicht erfolgreich: {result.error_message}"
+                )
+            content = result.content
+            input_tokens = result.token_usage.input
+            output_tokens = result.token_usage.output
     except (openclaw.GatewayError, openclaw.APIConnectionError, openclaw.APITimeoutError,
             openclaw.AgentExecutionError, openclaw.RateLimitError, openclaw.AuthenticationError) as exc:
         # `str(exc)` allein zeigt nur die generische Nachricht (z. B. "Gateway
@@ -262,19 +317,16 @@ async def _call_model_async(
             f"{role}: OpenClaw-Gateway-Fehler: {exc}" + (f" | details={details}" if details else "")
         ) from exc
 
-    if not result.success:
-        raise ModelProviderError(f"{role}: Agentenlauf nicht erfolgreich: {result.error_message}")
-
-    parsed = _parse_json_response(result.content, output_schema)
+    parsed = _parse_json_response(content, output_schema)
     model = MODEL_CLASS_MAP[model_class]
 
     return ModelCallResult(
         parsed=parsed,
         provider=MODEL_PROVIDER,
         model=model,
-        input_tokens=result.token_usage.input,
-        output_tokens=result.token_usage.output,
-        estimated_cost_usd=_estimate_cost_usd(model, result.token_usage.input, result.token_usage.output),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        estimated_cost_usd=_estimate_cost_usd(model, input_tokens, output_tokens),
     )
 
 

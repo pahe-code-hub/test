@@ -58,7 +58,13 @@ dedizierten Gateway-Agenten mit `MODEL_PROVIDER` und der jeweiligen
 `MODEL_CLASS_MAP`-Zuordnung übereinstimmen; nur dann sind Audit- und Kostendaten
 korrekt.
 
-**Bekannter openclaw-sdk-2.1.0-Bug (workaround bereits enthalten):** `Agent._build_send_params()` setzt im unveränderten SDK kein `model`-Feld im `chat.send`-Payload. Der rohe WebSocket-Pfad toleriert das (Modellauflösung serverseitig über `sessionKey`), die OpenAI-kompatible HTTP-Bridge lehnt den Request ohne `model` mit HTTP 400 ab. `app/model_provider.py` patcht `Agent._build_send_params` deshalb beim Import, um `model: "openclaw/<agentId>"` zu ergänzen (siehe Kommentar dort, `tests/test_model_provider.py::test_agent_build_send_params_includes_model_for_openai_compat_bridge`). Bei einem openclaw-sdk-Update prüfen, ob der Fix upstream vorhanden ist, und den Patch dann entfernen.
+**Bekannte openclaw-sdk-2.1.0-Bugs (Workarounds bereits enthalten, real gegen einen laufenden Gateway verifiziert):** Der HTTP-Zweig der OpenAI-kompatiblen Bridge ist im SDK an drei Stellen kaputt:
+
+1. `Agent._build_send_params()` baut das WS-RPC-Payload (`sessionKey`, `message`, `idempotencyKey`, `timeoutMs`); `POST /v1/responses` erwartet stattdessen ausschließlich `model`/`input` und lehnt sowohl fehlende Felder als auch die WS-RPC-Felder selbst ("Unrecognized keys") mit HTTP 400 ab.
+2. `Agent._execute_impl()` sucht im HTTP-Zweig den Antworttext nur unter `content`/`text`/`message` auf oberster Ebene; `/v1/responses` liefert ihn aber verschachtelt unter `output[].content[].text` - Ergebnis ohne Fix: leerer String.
+3. Derselbe HTTP-Zweig wertet `usage` überhaupt nicht aus - `token_usage` bliebe `None`.
+
+`app/model_provider.py` patcht `Agent._build_send_params` für Punkt 1 (siehe Kommentar dort) und umgeht `Agent.execute()` für Punkt 2/3 komplett, indem `call_model()` bei einer `OpenAICompatGateway`-Instanz direkt `gateway.call("chat.send", ...)` aufruft und die reale `/v1/responses`-Antwort selbst auswertet (`_call_via_openai_compat_bridge`). Der rohe WebSocket-/Local-Gateway-Pfad bleibt von alldem unberührt. Tests: `tests/test_model_provider.py::test_agent_build_send_params_rebuilds_payload_for_openai_compat_bridge`, `::test_agent_build_send_params_unchanged_for_raw_websocket_gateway`, `::test_call_model_over_openai_compat_bridge_end_to_end`. Bei einem openclaw-sdk-Update prüfen, ob die Fixes upstream vorhanden sind, und die Workarounds dann entfernen.
 
 ## Starten
 
