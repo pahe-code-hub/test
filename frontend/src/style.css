@@ -1,0 +1,1 @@
+:root{font-family:system-ui;color:#17202a;background:#f5f7fa}body{margin:0}main{max-width:1100px;margin:auto;padding:2rem}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem}article{background:white;border:1px solid #dfe6e9;border-radius:.6rem;padding:1rem}small{color:#52616b}a{color:#075985;overflow-wrap:anywhere}
