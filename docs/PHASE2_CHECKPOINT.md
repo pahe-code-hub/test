@@ -46,6 +46,9 @@ Hinzugefügt:
 Ausführungsstand in dieser Sandbox:
 
 * `python3 -m compileall -q app tests scripts alembic`: **bestanden**.
+* `alembic upgrade head` gegen eine neue temporäre SQLite-Datei:
+  **bestanden**; Tabellen `research` und `research_sources` inklusive Index und
+  Fremdschlüsseln wurden zusammen mit dem Phase-1-Schema angelegt.
 * `pytest`: **infrastrukturbedingt nicht ausführbar**. Das vorhandene `.venv`
   wurde mit Python 3.12 gebaut, die Sandbox enthält nur Python 3.11; der
   native `pydantic_core`-Build ist deshalb nicht importierbar. Paketinstallation
