@@ -20,9 +20,10 @@ class _DummySchema(BaseModel):
 
 
 @pytest.fixture(autouse=True)
-def reset_module_state():
+def reset_module_state(monkeypatch):
     """Den Client-Cache zwischen Tests zurücksetzen."""
     mp._client = None
+    monkeypatch.setenv("MPA_OPENCLAW_AGENT_ID_UNDERSTANDING", "test-understanding")
     yield
     mp._client = None
 
@@ -106,6 +107,13 @@ def test_call_model_uses_configured_gateway_agent(monkeypatch):
     mp.call_model("understanding", "MEDIUM", "sys", "ctx", _DummySchema)
 
     assert fake_client.get_agent.call_args.args[0] == "configured-understanding"
+
+
+def test_call_model_requires_role_specific_gateway_agent(monkeypatch):
+    monkeypatch.delenv("MPA_OPENCLAW_AGENT_ID_UNDERSTANDING")
+
+    with pytest.raises(mp.ModelProviderError, match="MPA_OPENCLAW_AGENT_ID_UNDERSTANDING fehlt"):
+        mp.call_model("understanding", "MEDIUM", "sys", "ctx", _DummySchema)
 
 
 def test_call_model_gateway_error_raises_model_provider_error(monkeypatch):

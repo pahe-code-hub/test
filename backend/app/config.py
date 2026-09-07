@@ -37,11 +37,10 @@ OPENCLAW_GATEWAY_WS_URL = os.environ.get("MPA_OPENCLAW_GATEWAY_WS_URL") or None
 OPENCLAW_OPENAI_BASE_URL = os.environ.get("MPA_OPENCLAW_OPENAI_BASE_URL") or None
 OPENCLAW_API_KEY = os.environ.get("MPA_OPENCLAW_API_KEY") or None
 
-# IDs bereits im Gateway konfigurierter Agenten. Das SDK kann AgentConfig zwar
-# entgegennehmen, überträgt Modell/System-Prompt beim RPC `agents.create` aber
-# nicht. Daher verwendet das Backend existierende Gateway-Agenten und isoliert
-# jeden Lauf über eine neue Session; rollenspezifische IDs sind optional.
-OPENCLAW_AGENT_ID = os.environ.get("MPA_OPENCLAW_AGENT_ID", "main")
+# Rollenbezogene IDs bereits im Gateway konfigurierter, dedizierter Agenten
+# werden erst beim jeweiligen Aufruf aus MPA_OPENCLAW_AGENT_ID_<ROLLE> gelesen.
+# Es gibt bewusst keinen globalen/default Agenten: Ein stiller Rückfall auf
+# einen persönlichen Gateway-Agenten würde Routing, Audit und Kosten verfälschen.
 
 # Grobe, konservative Kostenschätzung für die Kostenanzeige (Abschnitt 32).
 # Kein Anspruch auf Abrechnungsgenauigkeit - nur Größenordnung für die UI.

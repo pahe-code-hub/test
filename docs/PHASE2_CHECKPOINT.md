@@ -77,6 +77,12 @@ Code-Review gegen AT-2.1–AT-2.4 und SECURITY §3:
 * Im abschließenden Review wurde ein fehlendes Mapping von
   `ResearchFinding.finding` auf die gleichnamige `NOT NULL`-Spalte entdeckt
   und vor dem Checkpoint korrigiert; ein Regression-Assert prüft den Wert.
+* Im Folge-Review wurde der unsichere OpenClaw-Agent-Fallback auf `main`
+  entfernt. `call_model` verlangt nun je aufgerufener Rolle eine explizite
+  `MPA_OPENCLAW_AGENT_ID_<ROLLE>`-Konfiguration und schlägt andernfalls mit
+  `ModelProviderError` fehl. Der Setup-Abschnitt dokumentiert dedizierte,
+  modellkonforme Agenten für `understanding` und `research`; ein Regressionstest
+  deckt die fehlende Rollenkonfiguration ab.
 
 ## CHECKPOINT
 

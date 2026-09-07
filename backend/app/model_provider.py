@@ -31,7 +31,6 @@ from app.config import (
     OPENCLAW_GATEWAY_WS_URL,
     OPENCLAW_OPENAI_BASE_URL,
     OPENCLAW_API_KEY,
-    OPENCLAW_AGENT_ID,
 )
 
 T = TypeVar("T", bound=BaseModel)
@@ -138,9 +137,15 @@ async def _get_agent(role: str, model_class: str, system_prompt: str) -> "opencl
     if model_class not in MODEL_CLASS_MAP:
         raise ModelProviderError(f"Unbekannte Modellklasse: {model_class!r}")
 
-    client = await _get_client()
     env_name = f"MPA_OPENCLAW_AGENT_ID_{role.upper()}"
-    agent_id = os.environ.get(env_name, OPENCLAW_AGENT_ID)
+    agent_id = os.environ.get(env_name, "").strip()
+    if not agent_id:
+        raise ModelProviderError(
+            f"OpenClaw-Agent für Rolle {role!r} ist nicht konfiguriert; "
+            f"Umgebungsvariable {env_name} fehlt"
+        )
+
+    client = await _get_client()
     session_name = f"masterplan-{role}-{uuid.uuid4().hex}"
     return client.get_agent(agent_id, session_name=session_name)
 

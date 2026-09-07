@@ -24,8 +24,25 @@ export TAVILY_API_KEY=...              # nur serverseitig; Search + Extract
 # export MPA_OPENCLAW_GATEWAY_WS_URL=ws://127.0.0.1:18789
 # export MPA_OPENCLAW_API_KEY=...        # falls der Gateway Auth verlangt
 
+# Dedizierte MASTER-PLAN-AI-Agenten anlegen. Beim Anlegen für beide Rollen
+# das Modell konfigurieren, das MODEL_CLASS_MAP["MEDIUM"] entspricht
+# (standardmäßig anthropic/claude-sonnet-5), anschließend IDs zuordnen:
+openclaw agents add mpa-understanding
+openclaw agents add mpa-research
+export MPA_OPENCLAW_AGENT_ID_UNDERSTANDING=mpa-understanding
+export MPA_OPENCLAW_AGENT_ID_RESEARCH=mpa-research
+
 python -m alembic upgrade head        # legt masterplan.db an (SQLite, WAL-Modus)
 ```
+
+Die rollenbezogenen Agent-IDs sind Pflicht. Das Backend fällt bewusst nicht
+auf `main` oder einen anderen vorhandenen Agenten zurück. Insbesondere dürfen
+persönliche bzw. anderweitig geroutete Agenten wie `main`, `masterplan` oder
+`aktien` nicht wiederverwendet werden. Da das SDK das tatsächlich verwendete
+Modell nicht im `ExecutionResult` bestätigt, müssen Provider und Modell jedes
+dedizierten Gateway-Agenten mit `MODEL_PROVIDER` und der jeweiligen
+`MODEL_CLASS_MAP`-Zuordnung übereinstimmen; nur dann sind Audit- und Kostendaten
+korrekt.
 
 **Wichtiger Vorbehalt (siehe `docs/PHASE1_CHECKPOINT.md`):** In der Implementierungs-Sandbox dieser Session stand kein laufender OpenClaw-Gateway zur Verfügung. Die Adapter-Schicht (`app/model_provider.py`) ist gegen die reale `openclaw-sdk`-Schnittstelle gebaut und mit Mocks getestet (`tests/test_model_provider.py`), aber **nicht** Ende-zu-Ende gegen einen echten, laufenden Gateway verifiziert. Das muss vor Produktivbetrieb nachgeholt werden.
 
