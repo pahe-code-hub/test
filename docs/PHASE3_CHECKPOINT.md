@@ -52,6 +52,7 @@ Neu in `tests/test_phase3_planning.py`:
 |---|---|
 | `test_approval_runs_both_roles_in_parallel_with_identical_isolated_context` | AT-3.1/3.2: Barrier-erzwungene Überlappung, identischer Fremddaten-Kontext, getrennte Ergebnisse, überlappende Run-Zeiten und kein DB-Lock |
 | `test_disabled_gate_automatically_runs_phase3_and_stops_at_synthesizing` | beide Eintrittspfade und Parken an der Phase-4-Grenze |
+| `test_unequal_model_latencies_persist_both_branches_independently` | stark unterschiedliche Abschlusszeiten verlieren kein Ergebnis und erreichen weiterhin `SYNTHESIZING` |
 | `test_retry_repeats_only_failed_challenger_branch` | AT-3.3: erfolgreicher Architect bleibt unverändert, nur Challenger erhält Attempt 2 |
 | `test_solution_output_schema_rejects_incomplete_results` | AT-3.4 für beide strukturierten Schemas |
 
@@ -75,6 +76,10 @@ Tatsächlicher Ausführungsstand in dieser Sandbox:
 * Ein realer Paralleltest gegen den Gateway wurde nicht ausgeführt. Die dafür
   erforderlichen dedizierten Architect-/Challenger-Agenten sind laut Auftrag
   Nutzer-Infrastruktur und nicht Teil dieser Implementierung.
+* Nachgelagerte Review-Umgebung: ursprüngliche Phase-3-Suite **33/33 grün**,
+  Migration verifiziert. Der anschließend ergänzte Test für ungleiche
+  Modelllatenzen konnte in dieser Sandbox wegen des fehlenden Pytest-Moduls
+  nur per `compileall`/`py_compile`, nicht als Pytest-Lauf geprüft werden.
 
 ## REVIEW
 
@@ -85,9 +90,11 @@ Prüfung gegen AT-3.1–AT-3.4 und `SECURITY.md`:
   Kontextaufbau des anderen existieren. Der automatisierte Test erzwingt die
   Überlappung, konnte in dieser Sandbox aber nicht ausgeführt werden.
 * **AT-3.2:** Rollen schreiben über getrennte Tabellen, Sessions und
-  Transaktionen. Eine Barrier synchronisiert im Test die beiden
-  Persistierungsversuche. Der reale Testlauf bleibt wegen der Python-Toolchain
-  offen; kein grünes Ergebnis wird angenommen.
+  Transaktionen. Nur der Mock im Parallelitätstest synchronisiert den Beginn
+  beider Modellaufrufe; der Produktionspfad enthält keine Barrier und jeder
+  Zweig persistiert unabhängig, sobald sein Aufruf beendet ist. Der reale
+  Testlauf bleibt wegen der Python-Toolchain offen; kein grünes Ergebnis wird
+  angenommen.
 * **AT-3.3:** Der Retry wählt einen fehlgeschlagenen Phase-3-Lauf und ruft den
   Fan-out-Helfer mit genau dieser einen Rolle auf. Ein bereits erfolgreicher
   Zweig wird übersprungen und nicht überschrieben.
@@ -100,6 +107,14 @@ Prüfung gegen AT-3.1–AT-3.4 und `SECURITY.md`:
   wurde eingeführt.
 
 Beim Review wurde kein separater Phase-1/2-Bug gefunden.
+
+Ein Folge-Review fand eine irrtümlich im Produktionspfad platzierte
+`threading.Barrier(timeout=5)`, durch die unterschiedlich schnelle Modellläufe
+beide Ergebnisse verlieren konnten. Die Barrier wurde vollständig aus
+`_run_solution_agents()` entfernt. Ein Regressionstest startet beide
+Modell-Mocks gemeinsam, lässt Architect nach 0,01 Sekunden und Challenger erst
+nach 0,3 Sekunden fertig werden und verlangt dennoch zwei persistierte
+`DONE`-Ergebnisse sowie den Übergang nach `SYNTHESIZING`.
 
 ## CHECKPOINT
 

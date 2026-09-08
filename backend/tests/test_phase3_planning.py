@@ -157,6 +157,31 @@ def test_disabled_gate_automatically_runs_phase3_and_stops_at_synthesizing(clien
     assert set(seen_roles) == {"research", "architect", "challenger"}
 
 
+def test_unequal_model_latencies_persist_both_branches_independently(client):
+    project_id = prepare_research_gate(client)
+    both_started = threading.Barrier(2)
+    completed = []
+
+    def fake_call_model(**kwargs):
+        role = kwargs["role"]
+        both_started.wait(timeout=2)
+        time.sleep(0.01 if role == "architect" else 0.3)
+        completed.append(role)
+        return result(solution_output(kwargs["output_schema"], f"{role}-ok"))
+
+    with patch("app.routers.projects.call_model", side_effect=fake_call_model):
+        response = client.post(f"/api/projects/{project_id}/research/approve")
+
+    assert response.status_code == 200
+    assert set(completed) == {"architect", "challenger"}
+    body = response.json()
+    assert body["workflow_state"] == "SYNTHESIZING"
+    assert body["architect"]["run_status"] == "DONE"
+    assert body["challenger"]["run_status"] == "DONE"
+    assert body["architect"]["output"]["approach"] == "architect-ok"
+    assert body["challenger"]["output"]["approach"] == "challenger-ok"
+
+
 def test_retry_repeats_only_failed_challenger_branch(client, test_engine):
     project_id = prepare_research_gate(client)
 

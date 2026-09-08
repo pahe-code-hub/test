@@ -6,7 +6,6 @@ Synthesizer und Qualitätsrollen sind bewusst nicht enthalten.
 from __future__ import annotations
 
 import json
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -416,7 +415,6 @@ def _run_solution_agents(
     # RUNNING-Zeilen müssen vor den unabhängigen Writer-Sessions sichtbar sein.
     db.commit()
     branch_session = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
-    persistence_barrier = threading.Barrier(len(pending)) if len(pending) > 1 else None
 
     def invoke(role: str):
         model, run_id, output_schema, prompt = pending[role]
@@ -432,9 +430,6 @@ def _run_solution_agents(
         except ModelProviderError as exc:
             result = None
             error = exc
-
-        if persistence_barrier is not None:
-            persistence_barrier.wait(timeout=5)
 
         finished_at = _now()
         record_values = {
