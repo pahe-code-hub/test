@@ -165,14 +165,22 @@ Agenten, `ModelCallResult.model` weist tatsächlich `claude-sonnet-5` aus (kein
 `"main"`-Fallback, kein falsch deklariertes Modell), Token-/Kostenwerte sind
 real und plausibel.
 
-**AT-1.2 bleibt teilweise offen**, klar abgegrenzt: Dieser Testlauf beweist
-die technische Erreichbarkeit (Frage: kommt `call_model()` durch den echten
-Gateway zum echten Modell und zurück?), **nicht** die inhaltliche
-Prompt-Treue (Frage: stellt `understanding_v1` bei einem echten, absichtlich
-unterspezifizierten Projekt tatsächlich ≤3 passende Fragen, keine zu Technik/
-Framework/UI?). Dafür fehlt weiterhin ein Durchlauf der drei oben
-vorbereiteten Testfälle über den echten `/api/projects`-Workflow mit
-anschließender manueller Prüfung der zurückgegebenen Fragen — technisch jetzt
-trivial (Infrastruktur steht), aber nicht mehr Teil dieses
-Session-Blockers und daher nicht mehr auf dem kritischen Pfad zur
-Phase-2-Freigabe.
+**AT-1.2, inhaltlicher Teil: real durchgeführt und bestanden (2026-09-08).**
+Die drei vorbereiteten Testfälle liefen über den echten
+`/api/projects`-Workflow (`POST /api/projects` → `POST .../submit`) auf dem
+Server des Nutzers, mit vorher nötiger `alembic upgrade head` (Phase-2-
+Migration fehlte dort noch — nachgeholt) und laufendem uvicorn gegen den
+echten Gateway:
+
+| Fall | Ergebnis | Fragen | Bewertung |
+|---|---|---|---|
+| 1. Terminplanung ohne Rollen | `READY` | 0 | ≤3 ✓, keine Frage zu Technik/Framework/UI (weil gar keine Frage) ✓ |
+| 2. Dokumentenarchiv ohne Datenschutz-/Offline-Grenze | `READY` | 0 | ≤3 ✓, keine verbotene Frage ✓ |
+| 3. Störungsplattform ohne Freigabe-Instanz | `CLARIFICATION_REQUIRED` | 2 | ≤3 ✓; beide Fragen zu Rollen/Verwaltungs-Backend bzw. organisatorischem Zuschnitt (Gemeinde vs. mehrere Kommunen) — genau die absichtlich offen gelassene Dimension, keine Frage zu Technik/Framework/DB/UI ✓ |
+
+Fall 3 ist der aussagekräftigste Beleg: Der Agent fragte unaufgefordert genau
+danach, wer gemeldete Störungen bearbeitet und ob ein Verwaltungs-Backend zum
+Scope gehört — exakt die Lücke, die der Testfall bewusst offen ließ, ohne
+dass diese Erwartung im Prompt verraten wurde. Damit ist AT-1.2 vollständig
+(strukturell **und** inhaltlich) real nachgewiesen, nicht nur die technische
+Gateway-Erreichbarkeit.

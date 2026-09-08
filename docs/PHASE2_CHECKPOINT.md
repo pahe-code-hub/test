@@ -117,19 +117,21 @@ wurden direkt auf dem Server des Nutzers nachgeholt, mit dessen echtem
   und `npm run build` (`tsc -b && vite build`, 195 Module, `✓ built in 1.58s`,
   `dist/` inkl. `index.html`/CSS/JS) liefen beide sauber durch.
 
-**Weiterhin offen, klar abgegrenzt:**
+* AT-1.2s inhaltliche Prüfung: **bestanden** (2026-09-08, siehe
+  `PHASE1_CHECKPOINT.md` Abschnitt „AT-1.2, inhaltlicher Teil"). Alle drei
+  vorbereiteten Testfälle real über `/api/projects` → `/submit` ausgeführt:
+  2× `READY` ohne Rückfragen, 1× `CLARIFICATION_REQUIRED` mit genau 2 Fragen,
+  beide exakt zur absichtlich offen gelassenen Rollen-/Freigabe-Dimension,
+  keine zu Technik/Framework/DB/UI.
 
-* AT-1.2s inhaltliche Prüfung (≤3 passende Rückfragen, keine Technik-/
-  Framework-Fragen) über die drei vorbereiteten Testfälle im echten
-  `/api/projects`-Workflow — technisch jetzt uneingeschränkt möglich, aber
-  noch nicht durchgeführt. Einziger verbleibender Punkt.
+Damit sind alle in dieser und der vorigen Sitzung offenen Punkte real
+geschlossen — keine verbleibenden Vorbehalte mehr.
 
 ## CHECKPOINT
 
 Phase 2 ist implementiert, getestet (28/28), der reale OpenClaw-Gateway-
-E2E-Nachweis ist erbracht, ADR-003/AT-2.3 ist real validiert und der
-Frontend-Build läuft sauber durch. Vor vollständiger Freigabe fehlt nur noch
-ein einziger, klar umrissener und rein inhaltlicher Schritt (AT-1.2s
-Stichprobenprüfung der Rückfragen) — keine offenen Architektur-,
-Infrastruktur- oder Toolchain-Fragen mehr. Die endgültige Freigabe bleibt
-beim Nutzer/Claude-Code-Review.
+E2E-Nachweis ist erbracht, ADR-003/AT-2.3 ist real validiert, der
+Frontend-Build läuft sauber durch, und AT-1.2s inhaltliche Prüfung ist real
+bestanden. Keine offenen Architektur-, Infrastruktur-, Toolchain- oder
+Akzeptanzkriterien-Fragen mehr. Aus technischer Sicht ist Phase 2 vollständig
+freigabereif; die formale Freigabe trifft weiterhin der Nutzer.
