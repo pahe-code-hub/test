@@ -1,8 +1,9 @@
 # PHASE2_CHECKPOINT.md
 
-**Status: alle Akzeptanzkriterien real verifiziert (Commit `8dd8e60`,
-2026-09-08), technisch freigabereif — formale Nutzerfreigabe steht noch
-aus.**
+**Status: PHASE 2 = APPROVED** (Nutzerfreigabe 2026-09-08 auf Commit
+`8dd8e60` — alle Akzeptanzkriterien real verifiziert: 28/28 Tests, echter
+OpenClaw-Gateway-E2E-Nachweis, ADR-003/AT-2.3, Frontend-Build, AT-1.2
+inhaltlich).
 
 Nachweis für **Phase 2 — Recherche** aus `MASTER_PLAN_v0.2.md` Abschnitt 35,
 nach `PLAN → IMPLEMENT → TEST → REVIEW → CHECKPOINT`.
