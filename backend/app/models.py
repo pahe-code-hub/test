@@ -1,8 +1,8 @@
 """
-ORM-Modelle für Phase 1 (DATA_MODEL.md): projects, intake,
-understanding, research, research_sources, agent_runs. Weitere Tabellen
-(architect, challenger, synthesis, critic, evaluations, revisions, final)
-werden bewusst NICHT hier definiert - sie gehören zu den Phasen 3-6 und
+ORM-Modelle für Phase 1-3 (DATA_MODEL.md): projects, intake,
+understanding, research, research_sources, architect, challenger und
+agent_runs. Weitere Tabellen (synthesis, critic, evaluations, revisions, final)
+werden bewusst NICHT hier definiert - sie gehören zu den Phasen 4-6 und
 werden erst dort ergänzt, um keine
 Phasen vorwegzunehmen.
 """
@@ -97,6 +97,22 @@ class ResearchSource(Base):
     retrieved_at = Column(String, nullable=False)
     provider = Column(String, nullable=False)
     referenced_by_synthesis = Column(Integer, nullable=False, default=0)
+
+
+class Architect(Base):
+    __tablename__ = "architect"
+
+    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+    output = Column(Text, nullable=True)
+    run_status = Column(String, nullable=False, default="PENDING")
+
+
+class Challenger(Base):
+    __tablename__ = "challenger"
+
+    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+    output = Column(Text, nullable=True)
+    run_status = Column(String, nullable=False, default="PENDING")
 
 
 class AgentRun(Base):

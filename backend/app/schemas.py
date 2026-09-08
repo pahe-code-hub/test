@@ -53,6 +53,21 @@ class ResearchOutput(BaseModel):
     sources: list[ResearchFinding] = Field(min_length=1)
 
 
+class ArchitectOutput(BaseModel):
+    approach: str
+    structure: str
+    components: list[str]
+    interactions: str
+    technologies: list[str]
+    risks: list[str]
+    implementation_approach: str
+    open_points: list[str]
+
+
+class ChallengerOutput(ArchitectOutput):
+    pass
+
+
 # --- API: Intake (Abschnitt 3) ---------------------------------------------
 
 
@@ -121,6 +136,11 @@ class ResearchOut(BaseModel):
     sources: list[ResearchSourceOut]
 
 
+class SolutionAgentOut(BaseModel):
+    output: Optional[dict] = None
+    run_status: str
+
+
 class ProjectDetail(BaseModel):
     id: str
     title: str
@@ -135,6 +155,8 @@ class ProjectDetail(BaseModel):
     intake: IntakeOut
     understanding: Optional[UnderstandingOut] = None
     research: Optional[ResearchOut] = None
+    architect: Optional[SolutionAgentOut] = None
+    challenger: Optional[SolutionAgentOut] = None
     last_run_status: Optional[str] = None
 
 

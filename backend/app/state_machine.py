@@ -1,17 +1,14 @@
 """
-Zustände und Guards aus WORKFLOW_STATES.md, beschränkt auf die in
-Phase 1 tatsächlich erreichbaren Übergänge:
+Zustände und Guards aus WORKFLOW_STATES.md, beschränkt auf die bis
+Phase 3 tatsächlich erreichbaren Übergänge:
 
     DRAFT -> UNDERSTANDING -> WAITING_FOR_USER_CONFIRMATION -> RESEARCHING
                               \\-> WAITING_FOR_USER_CLARIFICATION -> UNDERSTANDING
                                                                   -> ESCALATION_REQUIRED(CLARIFICATION_LIMIT) -> DRAFT
 
-RESEARCHING ist in Phase 1 ein reiner Zielzustand (bestätigtes
-Verständnis erreicht, siehe MASTER_PLAN_v0.2.md Abschnitt 35,
-Phase-1-Abnahme: "Ein Projekt kann von DRAFT bis bestätigtem
-Verständnis laufen") - der Research Agent selbst wird erst in
-Phase 2 implementiert. Es findet hier bewusst KEINE Vorwegnahme
-späterer States (GENERATING_SOLUTIONS, SYNTHESIZING, ...) statt.
+Phase 3 führt `GENERATING_SOLUTIONS` aus und setzt nach zwei erfolgreichen
+Zweigen ausschließlich den Grenz-State `SYNTHESIZING`. Der Synthesizer selbst
+bleibt Phase 4 und wird hier nicht ausgeführt.
 
 Kein Router darf einen Übergang ausführen, ohne vorher hier zu
 prüfen, ob er zulässig ist - "Kein Agent darf eigenständig
@@ -33,6 +30,7 @@ RESEARCHING = "RESEARCHING"  # Zielzustand nach Bestätigung, in Phase 1 nicht w
 RESEARCH_READY = "RESEARCH_READY"
 WAITING_FOR_RESEARCH_APPROVAL = "WAITING_FOR_RESEARCH_APPROVAL"
 GENERATING_SOLUTIONS = "GENERATING_SOLUTIONS"
+SYNTHESIZING = "SYNTHESIZING"
 
 CLARIFICATION_LIMIT = "CLARIFICATION_LIMIT"
 

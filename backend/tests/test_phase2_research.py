@@ -52,7 +52,8 @@ def run_to_research(client, gate):
     with patch("app.routers.projects.call_model", return_value=result(READY)):
         client.post(f"/api/projects/{project_id}/submit")
     with patch("app.routers.projects._research_provider", return_value=FakeResearchProvider()), \
-         patch("app.routers.projects.call_model", return_value=result(RESEARCH)):
+         patch("app.routers.projects.call_model", return_value=result(RESEARCH)), \
+         patch("app.routers.projects._run_solution_agents"):
         response = client.post(f"/api/projects/{project_id}/understanding/confirm")
     return project_id, response
 
@@ -64,7 +65,8 @@ def test_research_persists_extract_timestamp_and_gate(client):
     assert len(body["research"]["solutions"]) == 3
     assert body["research"]["sources"][0]["retrieved_at"] == "2026-09-07T06:00:00+00:00"
     assert body["research"]["sources"][0]["finding"] == "MIT-lizenziertes Werkzeug"
-    approved = client.post(f"/api/projects/{project_id}/research/approve")
+    with patch("app.routers.projects._run_solution_agents"):
+        approved = client.post(f"/api/projects/{project_id}/research/approve")
     assert approved.json()["workflow_state"] == "GENERATING_SOLUTIONS"
 
 

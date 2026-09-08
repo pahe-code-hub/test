@@ -1,5 +1,5 @@
 """
-FastAPI-Einstiegspunkt, Phase 1 + 2.
+FastAPI-Einstiegspunkt, Phase 1-3.
 
 Kein SSE-Endpunkt in Phase 1 (Live-Status ist laut MASTER_PLAN_v0.2.md
 Abschnitt 35 Phase 7 - UX/Betrieb; die Phase-1-Akzeptanzkriterien in
@@ -11,7 +11,7 @@ from fastapi import FastAPI
 
 from app.routers import projects
 
-app = FastAPI(title="MASTER PLAN AI - Backend (Phase 1 + 2)")
+app = FastAPI(title="MASTER PLAN AI - Backend (Phase 1-3)")
 app.include_router(projects.router)
 
 
