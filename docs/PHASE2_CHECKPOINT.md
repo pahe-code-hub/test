@@ -1,5 +1,9 @@
 # PHASE2_CHECKPOINT.md
 
+**Status: PHASE 2 = APPROVED** (Nutzerfreigabe auf Commit `8dd8e60`,
+2026-09-08 — alle Punkte aus „Abschluss 2026-09-07"/„Abschluss 2026-09-08"
+real verifiziert, keine offenen Vorbehalte).
+
 Nachweis für **Phase 2 — Recherche** aus `MASTER_PLAN_v0.2.md` Abschnitt 35,
 nach `PLAN → IMPLEMENT → TEST → REVIEW → CHECKPOINT`.
 
