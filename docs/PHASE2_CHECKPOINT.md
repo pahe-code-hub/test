@@ -110,25 +110,26 @@ wurden direkt auf dem Server des Nutzers nachgeholt, mit dessen echtem
   dokumentiert und durch dedizierte Tests abgesichert).
 * ADR-003/AT-2.3: bereits zuvor real validiert (Commit `5a21da3`), unverändert
   bestanden.
+* Frontend-Build (`npm install && npm run build`) auf dem Server des Nutzers:
+  **bestanden**, nach Behebung eines realen Versionsfehlers in
+  `package.json` (Commit `ca8e26d`, `rehype-sanitize`/`typescript` zeigten auf
+  nicht existente npm-Versionen). `npm install` (151 Pakete, 0 Sicherheitslücken)
+  und `npm run build` (`tsc -b && vite build`, 195 Module, `✓ built in 1.58s`,
+  `dist/` inkl. `index.html`/CSS/JS) liefen beide sauber durch.
 
 **Weiterhin offen, klar abgegrenzt:**
 
-* Frontend-Build (`npm install && npm run build`) wurde auf dem Server des
-  Nutzers zwar begonnen und ein realer Versionsfehler in `package.json`
-  gefunden und behoben (Commit `ca8e26d`, `rehype-sanitize`/`typescript`
-  zeigten auf nicht existente npm-Versionen) — der Build wurde nach dem Fix
-  aber noch nicht erneut bestätigt durchlaufen. Letzter offener technischer
-  Punkt vor vollständiger Phase-2-Freigabe.
 * AT-1.2s inhaltliche Prüfung (≤3 passende Rückfragen, keine Technik-/
   Framework-Fragen) über die drei vorbereiteten Testfälle im echten
   `/api/projects`-Workflow — technisch jetzt uneingeschränkt möglich, aber
-  noch nicht durchgeführt.
+  noch nicht durchgeführt. Einziger verbleibender Punkt.
 
 ## CHECKPOINT
 
-Phase 2 ist implementiert, getestet (28/28) und der reale OpenClaw-Gateway-
-E2E-Nachweis ist erbracht. ADR-003/AT-2.3 ist real validiert. Vor
-vollständiger Freigabe fehlen nur noch zwei kleine, klar umrissene und rein
-bestätigende Schritte (Frontend-Build-Bestätigung, AT-1.2-Inhaltsprüfung) —
-keine offenen Architektur- oder Infrastrukturfragen mehr. Die endgültige
-Freigabe bleibt beim Nutzer/Claude-Code-Review.
+Phase 2 ist implementiert, getestet (28/28), der reale OpenClaw-Gateway-
+E2E-Nachweis ist erbracht, ADR-003/AT-2.3 ist real validiert und der
+Frontend-Build läuft sauber durch. Vor vollständiger Freigabe fehlt nur noch
+ein einziger, klar umrissener und rein inhaltlicher Schritt (AT-1.2s
+Stichprobenprüfung der Rückfragen) — keine offenen Architektur-,
+Infrastruktur- oder Toolchain-Fragen mehr. Die endgültige Freigabe bleibt
+beim Nutzer/Claude-Code-Review.
