@@ -116,11 +116,34 @@ Modell-Mocks gemeinsam, lässt Architect nach 0,01 Sekunden und Challenger erst
 nach 0,3 Sekunden fertig werden und verlangt dennoch zwei persistierte
 `DONE`-Ergebnisse sowie den Übergang nach `SYNTHESIZING`.
 
+## Unabhängige Verifikation (Claude Code, 2026-09-08)
+
+Code gezogen und in einer funktionierenden Umgebung geprüft, nicht nur
+Claws eigene Angaben übernommen:
+
+* `python -m alembic upgrade head` gegen eine frische SQLite-Datei:
+  **bestanden**, `architect`/`challenger`-Tabellen entsprechen `DATA_MODEL.md`.
+* `python -m pytest tests/ -v`: **34 von 34 bestanden**, keine Regression.
+* Manueller Code-Review von `_run_solution_agents()`/`invoke()` fand den oben
+  dokumentierten `threading.Barrier`-Fund (Produktionscode, kein
+  Test-Artefakt) — Rückmeldung an Claw geschickt, Fix (`22964d1`) verifiziert:
+  Barrier vollständig entfernt, Regressionstest (0,01s vs. 0,3s Latenz) prüft
+  genau das vorherige Fehlerbild und läuft grün.
+* Retry-Pfad (`role in ("architect","challenger")`) und Kontext-Trennung
+  (`_build_solution_context`) stichprobenartig gegengelesen, keine weiteren
+  Befunde.
+
+**Noch nicht real verifiziert** (wie bei Phase 1/2 vor dem jeweiligen realen
+Gateway-Lauf): Architect/Challenger gegen den tatsächlich laufenden
+OpenClaw-Gateway mit echten `mpa-architect`/`mpa-challenger`-Agenten. Dafür
+müssen diese beiden Agenten zuerst im Gateway angelegt werden (siehe
+`backend/README.md` Setup-Abschnitt).
+
 ## CHECKPOINT
 
-Phase 3 ist code-seitig vollständig implementiert und an der Grenze
-`SYNTHESIZING` geparkt. Eine endgültige Freigabe wird hier nicht behauptet:
-offen bleiben die Ausführung der Testsuite und Migration in einer kompatiblen
-Python-Umgebung sowie optional der reale Parallelitätsnachweis gegen zwei vom
-Nutzer eingerichtete HIGH-Gateway-Agenten. Die endgültige Freigabe bleibt beim
-Nutzer/Claude-Code-Review.
+Phase 3 ist code-seitig vollständig implementiert, real getestet (34/34) und
+ein bei der Verifikation gefundener Bug (Produktions-Barrier) wurde behoben
+und gegengeprüft. Offen bleibt ausschließlich der reale Gateway-E2E-Nachweis
+mit den beiden neuen dedizierten Agenten — technisch unkompliziert (gleiches
+Muster wie bei Phase 1/2), aber noch nicht durchgeführt. Die endgültige
+Freigabe bleibt beim Nutzer.
