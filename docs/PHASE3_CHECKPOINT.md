@@ -133,17 +133,50 @@ Claws eigene Angaben übernommen:
   (`_build_solution_context`) stichprobenartig gegengelesen, keine weiteren
   Befunde.
 
-**Noch nicht real verifiziert** (wie bei Phase 1/2 vor dem jeweiligen realen
-Gateway-Lauf): Architect/Challenger gegen den tatsächlich laufenden
-OpenClaw-Gateway mit echten `mpa-architect`/`mpa-challenger`-Agenten. Dafür
-müssen diese beiden Agenten zuerst im Gateway angelegt werden (siehe
-`backend/README.md` Setup-Abschnitt).
+## Abschluss 2026-09-09 (real, auf dem Server des Nutzers)
+
+`mpa-architect`/`mpa-challenger` (Modell `anthropic/claude-opus-5`, Rolle
+HIGH) im Gateway angelegt und der komplette Phase-1→3-Workflow real über die
+API durchgespielt (`POST /api/projects` → `submit` → `understanding/confirm`
+→ `retry` für den Research-Zweig). Dabei zwei weitere echte, zuvor unbekannte
+openclaw-sdk-2.1.0-Bugs gefunden und behoben (Commits `31e5052`, `a4be4e0`):
+
+4. `OpenClawClient._build_gateway()` gibt `config.timeout` beim
+   `openai_base_url`-Pfad nicht an `OpenAICompatGateway` weiter — die bleibt
+   bei ihrem Default von 30s, unabhängig von `MODEL_CALL_TIMEOUT_SECONDS`.
+   Ein echter `research`-Aufruf mit extrahiertem Tavily-Seiteninhalt im
+   Kontext überschreitet 30s real und schlug mit einem nichtssagenden,
+   leeren `httpx.ReadTimeout` fehl.
+5. `TavilyResearchProvider._post()` verschluckte bei jedem HTTP-Fehler die
+   Detailmeldung — half nicht, einen echten 401 (falscher Key) von einem
+   anderen Fehler zu unterscheiden.
+
+Nach beiden Fixes lief der komplette Workflow real durch:
+
+```
+workflow_state: SYNTHESIZING
+research.run_status: (implizit DONE, 6 reale Tavily-Quellen)
+architect.run_status: DONE
+challenger.run_status: DONE
+total_model_calls: 4, total_estimated_cost_usd: 0.987307
+```
+
+Architect und Challenger lieferten inhaltlich klar unterscheidbare, jeweils
+in sich stimmige Entwürfe (Architect: Django/PostgreSQL, gründlicher
+Drei-Schichten-Aufbau; Challenger: SQLite/Flask, radikal minimal, explizite
+"Kauf-vor-Bau"-Prüfung als Schritt 0) — kein Abschreiben, keine
+Überschneidung mit dem jeweils anderen Output. Das ist der reale Beleg für
+AT-3.1 (unabhängiger Kontext) über den Code-Review hinaus.
+
+Damit sind alle in dieser und den vorigen Sitzungen offenen Punkte für
+Phase 3 real geschlossen — keine verbleibenden Vorbehalte.
 
 ## CHECKPOINT
 
-Phase 3 ist code-seitig vollständig implementiert, real getestet (34/34) und
-ein bei der Verifikation gefundener Bug (Produktions-Barrier) wurde behoben
-und gegengeprüft. Offen bleibt ausschließlich der reale Gateway-E2E-Nachweis
-mit den beiden neuen dedizierten Agenten — technisch unkompliziert (gleiches
-Muster wie bei Phase 1/2), aber noch nicht durchgeführt. Die endgültige
-Freigabe bleibt beim Nutzer.
+Phase 3 ist vollständig implementiert, real getestet (36/36), zwei während
+der Verifikation gefundene Bugs (Produktions-Barrier, ignorierter Gateway-
+Timeout) wurden behoben und gegengeprüft, und der komplette Workflow inkl.
+Architect/Challenger lief real über den OpenClaw-Gateway durch — mit
+inhaltlich überzeugenden, klar unterscheidbaren Ergebnissen. Aus technischer
+Sicht ist Phase 3 vollständig freigabereif. Die endgültige Freigabe bleibt
+beim Nutzer.
