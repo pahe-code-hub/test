@@ -166,6 +166,34 @@ if not getattr(openclaw.Agent, "_mpa_model_field_patch_applied", False):
     openclaw.Agent._mpa_model_field_patch_applied = True
 
 
+# --- Workaround für openclaw-sdk 2.1.0 (Fortsetzung): ignorierter Timeout --
+#
+# `OpenClawClient._build_gateway()` gibt beim `openai_base_url`-Pfad `config.
+# timeout` nicht an `OpenAICompatGateway` weiter - die bleibt bei ihrem
+# Konstruktor-Default von 30 Sekunden, unabhängig von
+# `MODEL_CALL_TIMEOUT_SECONDS`/dem an `OpenClawClient.connect(timeout=...)`
+# übergebenen Wert (verifiziert im SDK-Quellcode: `OpenAICompatGateway(config.
+# openai_base_url, api_key=config.api_key)` - kein `timeout`-Kwarg). Ein
+# echter `research`-Lauf mit extrahiertem Seiteninhalt im Kontext überschreitet
+# 30s real (verifiziert: `httpx.ReadTimeout` mit leerer `str()`-Repräsentation
+# erzeugt die sonst unerklärliche Fehlermeldung "HTTP request failed for
+# chat.send: " ohne jeden Grund dahinter - siehe PHASE3_CHECKPOINT.md). Patch
+# ergänzt den fehlenden `timeout`-Parameter, sofern die Zielklasse
+# `OpenAICompatGateway` ist; der WS-/Local-Pfad ist unberührt (deren
+# `retry_policy`-Weitergabe war nie betroffen).
+if not getattr(openclaw.OpenClawClient, "_mpa_gateway_timeout_patch_applied", False):
+    _original_build_gateway = openclaw.OpenClawClient._build_gateway
+
+    def _build_gateway_with_timeout(config):
+        gateway = _original_build_gateway(config)
+        if isinstance(gateway, _OpenAICompatGateway):
+            gateway._timeout = config.timeout
+        return gateway
+
+    openclaw.OpenClawClient._build_gateway = staticmethod(_build_gateway_with_timeout)
+    openclaw.OpenClawClient._mpa_gateway_timeout_patch_applied = True
+
+
 async def _get_agent(role: str, model_class: str, system_prompt: str) -> "openclaw.Agent":
     """Erzeugt einen Session-isolierten Proxy auf einen existierenden Agenten.
 

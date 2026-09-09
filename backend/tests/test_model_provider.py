@@ -253,3 +253,26 @@ def test_call_model_over_openai_compat_bridge_end_to_end(monkeypatch):
     assert call_args.args[0] == "chat.send"
     assert sent_params["model"] == "openclaw/test-understanding"
     assert set(sent_params.keys()) == {"model", "input"}
+
+
+def test_build_gateway_forwards_configured_timeout_to_openai_compat_bridge():
+    """Regressionstest für den openclaw-sdk-2.1.0-Patch in model_provider.py.
+
+    `OpenClawClient._build_gateway()` gibt `config.timeout` im
+    `openai_base_url`-Pfad im unveränderten SDK nicht an
+    `OpenAICompatGateway` weiter - die bleibt bei ihrem Konstruktor-Default
+    von 30 Sekunden, egal was `MODEL_CALL_TIMEOUT_SECONDS`/`call_model(...,
+    timeout=...)` konfiguriert. Ein echter `research`-Lauf mit extrahiertem
+    Seiteninhalt im Kontext überschreitet 30s real und schlägt mit einem
+    nichtssagenden `httpx.ReadTimeout` (leere `str()`-Repräsentation) fehl -
+    real gegen einen laufenden Gateway verifiziert, siehe
+    docs/PHASE3_CHECKPOINT.md. Dieser Test bricht, falls der Patch entfernt
+    oder von einer SDK-Aktualisierung überschrieben wird, ohne dass ein
+    Ersatz existiert.
+    """
+    from openclaw_sdk.core.config import ClientConfig
+
+    config = ClientConfig(openai_base_url="http://example.test", api_key="k", timeout=123)
+    gateway = openclaw.OpenClawClient._build_gateway(config)
+
+    assert gateway._timeout == 123
