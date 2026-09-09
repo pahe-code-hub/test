@@ -54,8 +54,18 @@ class TavilyResearchProvider:
             response = self._client.post(path, json=payload)
             response.raise_for_status()
             data = response.json()
+        except httpx.HTTPStatusError as exc:
+            # Status + Response-Body (kein Secret darin - der API-Key steckt
+            # nur im Request-Header, nie in Tavilys Antwort) machen den
+            # Fehler diagnostizierbar; ohne das war jeder Tavily-Fehler
+            # (falscher Key, Kontingent aufgebraucht, ungültiges Payload...)
+            # nur als nichtssagendes "fehlgeschlagen" sichtbar.
+            body = exc.response.text[:300]
+            raise ResearchProviderError(
+                f"Tavily-Aufruf {path} fehlgeschlagen: HTTP {exc.response.status_code}: {body}"
+            ) from exc
         except (httpx.HTTPError, ValueError) as exc:
-            raise ResearchProviderError(f"Tavily-Aufruf {path} fehlgeschlagen") from exc
+            raise ResearchProviderError(f"Tavily-Aufruf {path} fehlgeschlagen: {exc}") from exc
         if not isinstance(data, dict):
             raise ResearchProviderError(f"Tavily-Aufruf {path} lieferte kein Objekt")
         return data

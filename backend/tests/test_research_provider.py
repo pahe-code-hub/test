@@ -1,8 +1,9 @@
 from datetime import datetime
 
 import httpx
+import pytest
 
-from app.research_provider import TavilyResearchProvider
+from app.research_provider import ResearchProviderError, TavilyResearchProvider
 
 
 def test_tavily_search_and_extract_are_separate_real_endpoints():
@@ -39,3 +40,20 @@ def test_extract_timestamp_is_generated_by_provider_not_response():
     )
     page = TavilyResearchProvider(api_key="dummy", client=client).extract(["https://example.test"])[0]
     assert not page.retrieved_at.startswith("1900-")
+
+
+def test_http_error_includes_status_and_body_not_just_generic_message():
+    """Vor diesem Fix wurde jeder Tavily-HTTP-Fehler (falscher Key, Kontingent
+    aufgebraucht, ungültiges Payload...) zu einem nichtssagenden
+    "Tavily-Aufruf /search fehlgeschlagen" ohne jeden Grund dahinter - real
+    beobachtet beim Testen gegen den echten Tavily-Endpunkt."""
+    client = httpx.Client(
+        base_url="https://api.tavily.test",
+        transport=httpx.MockTransport(lambda request: httpx.Response(
+            401, json={"detail": "Invalid API key"}
+        )),
+    )
+    provider = TavilyResearchProvider(api_key="wrong", client=client)
+
+    with pytest.raises(ResearchProviderError, match="401"):
+        provider.search("query", "requirements", "official sources")
