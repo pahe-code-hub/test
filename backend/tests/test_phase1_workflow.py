@@ -85,7 +85,13 @@ def test_confirm_transitions_to_researching(client):
     with patch("app.routers.projects.call_model", return_value=_result(READY_OUTPUT)):
         client.post(f"/api/projects/{project_id}/submit")
 
-    resp = client.post(f"/api/projects/{project_id}/understanding/confirm")
+    # research_v1 selbst ist nicht Gegenstand dieses Tests (Phase 2/3
+    # haben eigene Suiten) - _run_research_agent wird gemockt, sonst würde
+    # confirm() einen echten Research+Architect/Challenger-Durchlauf
+    # gegen den echten OpenClaw-Gateway auslösen, sobald reale Credentials
+    # in der Umgebung stehen (realer Kostenverursacher, gefunden 2026-09-09).
+    with patch("app.routers.projects._run_research_agent"):
+        resp = client.post(f"/api/projects/{project_id}/understanding/confirm")
     assert resp.status_code == 200
     assert resp.json()["workflow_state"] == "RESEARCHING"
 
@@ -219,7 +225,10 @@ def test_state_survives_restart(test_engine, client):
     project_id = resp.json()["id"]
     with patch("app.routers.projects.call_model", return_value=_result(READY_OUTPUT)):
         client.post(f"/api/projects/{project_id}/submit")
-    client.post(f"/api/projects/{project_id}/understanding/confirm")
+    # siehe test_confirm_transitions_to_researching: _run_research_agent
+    # gemockt, um einen echten Gateway-/Tavily-Durchlauf im Test zu vermeiden.
+    with patch("app.routers.projects._run_research_agent"):
+        client.post(f"/api/projects/{project_id}/understanding/confirm")
 
     # "Neustart" simulieren: frische Session/Engine auf derselben Datei,
     # ohne den bisherigen SessionLocal/Cache wiederzuverwenden.
