@@ -101,7 +101,12 @@ def test_approval_runs_both_roles_in_parallel_with_identical_isolated_context(
         schema = kwargs["output_schema"]
         return result(solution_output(schema, f"{role}-only-output"))
 
-    with patch("app.routers.projects.call_model", side_effect=fake_call_model):
+    # Phase 4 löst automatisch synthesizer_v1 aus, sobald SYNTHESIZING
+    # erreicht ist - für diesen Phase-3-Test (Fokus: Architect/Challenger-
+    # Parallelität) wird das analog zu test_phase2_research.py's
+    # _run_solution_agents-Patch ausgeblendet.
+    with patch("app.routers.projects.call_model", side_effect=fake_call_model), \
+         patch("app.routers.projects._run_synthesis_agent"):
         response = client.post(f"/api/projects/{project_id}/research/approve")
 
     assert response.status_code == 200
@@ -150,7 +155,8 @@ def test_disabled_gate_automatically_runs_phase3_and_stops_at_synthesizing(clien
         return result(solution_output(kwargs["output_schema"], role))
 
     with patch("app.routers.projects._research_provider", return_value=FakeResearchProvider()), \
-         patch("app.routers.projects.call_model", side_effect=fake_call_model):
+         patch("app.routers.projects.call_model", side_effect=fake_call_model), \
+         patch("app.routers.projects._run_synthesis_agent"):
         response = client.post(f"/api/projects/{project_id}/understanding/confirm")
 
     assert response.json()["workflow_state"] == "SYNTHESIZING"
@@ -169,7 +175,8 @@ def test_unequal_model_latencies_persist_both_branches_independently(client):
         completed.append(role)
         return result(solution_output(kwargs["output_schema"], f"{role}-ok"))
 
-    with patch("app.routers.projects.call_model", side_effect=fake_call_model):
+    with patch("app.routers.projects.call_model", side_effect=fake_call_model), \
+         patch("app.routers.projects._run_synthesis_agent"):
         response = client.post(f"/api/projects/{project_id}/research/approve")
 
     assert response.status_code == 200
@@ -198,7 +205,7 @@ def test_retry_repeats_only_failed_challenger_branch(client, test_engine):
 
     with patch("app.routers.projects.call_model", return_value=result(
         solution_output(ChallengerOutput, "challenger-retry-ok")
-    )) as model:
+    )) as model, patch("app.routers.projects._run_synthesis_agent"):
         retried = client.post(f"/api/projects/{project_id}/retry")
 
     assert retried.json()["workflow_state"] == "SYNTHESIZING"

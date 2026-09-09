@@ -1,10 +1,9 @@
 """
-ORM-Modelle für Phase 1-3 (DATA_MODEL.md): projects, intake,
-understanding, research, research_sources, architect, challenger und
-agent_runs. Weitere Tabellen (synthesis, critic, evaluations, revisions, final)
-werden bewusst NICHT hier definiert - sie gehören zu den Phasen 4-6 und
-werden erst dort ergänzt, um keine
-Phasen vorwegzunehmen.
+ORM-Modelle für Phase 1-4 (DATA_MODEL.md): projects, intake,
+understanding, research, research_sources, architect, challenger,
+synthesis und agent_runs. Weitere Tabellen (critic, evaluations, revisions,
+final) werden bewusst NICHT hier definiert - sie gehören zu den Phasen 5-6
+und werden erst dort ergänzt, um keine Phasen vorwegzunehmen.
 """
 import uuid
 from datetime import datetime, timezone
@@ -113,6 +112,20 @@ class Challenger(Base):
     project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
     output = Column(Text, nullable=True)
     run_status = Column(String, nullable=False, default="PENDING")
+
+
+class Synthesis(Base):
+    """Multi-Versionen-Tabelle (nicht Single-Row wie Architect/Challenger):
+    jede ÄNDERUNGSWUNSCH-Runde erzeugt eine neue Zeile statt die vorherige
+    zu überschreiben (AT-4.2). Nur version = MAX(version) je project_id ist
+    aktuell gültig (DATA_MODEL.md)."""
+
+    __tablename__ = "synthesis"
+
+    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+    version = Column(Integer, primary_key=True)
+    output = Column(Text, nullable=False)
+    approved_at = Column(String, nullable=True)
 
 
 class AgentRun(Base):

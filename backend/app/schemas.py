@@ -68,6 +68,22 @@ class ChallengerOutput(ArchitectOutput):
     pass
 
 
+class SynthesisExistingSolution(BaseModel):
+    source_id: str
+    note: str
+
+
+class SynthesisOutput(BaseModel):
+    approach: str
+    adopted_core_elements: list[str]
+    discarded_or_changed_approaches: list[str]
+    structure: str
+    existing_solutions_open_source: list[SynthesisExistingSolution]
+    key_decisions: list[str]
+    risks_open_points: list[str]
+    conclusion: str
+
+
 # --- API: Intake (Abschnitt 3) ---------------------------------------------
 
 
@@ -141,6 +157,12 @@ class SolutionAgentOut(BaseModel):
     run_status: str
 
 
+class SynthesisOut(BaseModel):
+    version: int
+    output: dict
+    approved_at: Optional[str] = None
+
+
 class ProjectDetail(BaseModel):
     id: str
     title: str
@@ -157,11 +179,19 @@ class ProjectDetail(BaseModel):
     research: Optional[ResearchOut] = None
     architect: Optional[SolutionAgentOut] = None
     challenger: Optional[SolutionAgentOut] = None
+    synthesis: Optional[SynthesisOut] = None
     last_run_status: Optional[str] = None
+    # Nur im synthesis/change-request-Response gesetzt (ab Runde 3,
+    # API_CONTRACT.md), NICHT generisch bei jedem GET - siehe Router.
+    hint: Optional[str] = None
 
 
 class ResearchRerun(BaseModel):
     comment: Optional[str] = Field(None, max_length=4000)
+
+
+class SynthesisChangeRequest(BaseModel):
+    comment: str = Field(..., min_length=1, max_length=4000)
 
 
 class ClarificationAnswer(BaseModel):

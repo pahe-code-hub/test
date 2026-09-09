@@ -1,8 +1,10 @@
-# MASTER PLAN AI — Backend (Phase 1–3)
+# MASTER PLAN AI — Backend (Phase 1–4)
 
-Implementiert Phase 1 (Workflow-Kern), Phase 2 (Research) und Phase 3
-(Architect + Challenger) aus `MASTER_PLAN_v0.2.md` Abschnitt 35. Keine
-Synthese- oder späteren Rollen. Siehe die Checkpoints unter `docs/`.
+Implementiert Phase 1 (Workflow-Kern), Phase 2 (Research), Phase 3
+(Architect + Challenger) und Phase 4 (Synthesizer + Nutzerfreigabe 2) aus
+`MASTER_PLAN_v0.2.md` Abschnitt 35. Keine Qualitätsrollen (Critic/
+Evaluator/Revision) oder Final Builder. Siehe die Checkpoints unter
+`docs/`.
 
 Modellaufrufe laufen ausschließlich über den **OpenClaw-Gateway** (`openclaw-sdk`), nie direkt gegen einen Modellanbieter-Client (ADR-011) — siehe `docs/DECISIONS.md` ADR-011 zur Begründung dieser Korrektur gegenüber der ersten Phase-1-Implementierung.
 
@@ -45,18 +47,22 @@ openclaw agents add mpa-understanding
 openclaw agents add mpa-research
 openclaw agents add mpa-architect
 openclaw agents add mpa-challenger
+openclaw agents add mpa-synthesizer
 export MPA_OPENCLAW_AGENT_ID_UNDERSTANDING=mpa-understanding
 export MPA_OPENCLAW_AGENT_ID_RESEARCH=mpa-research
 export MPA_OPENCLAW_AGENT_ID_ARCHITECT=mpa-architect
 export MPA_OPENCLAW_AGENT_ID_CHALLENGER=mpa-challenger
+export MPA_OPENCLAW_AGENT_ID_SYNTHESIZER=mpa-synthesizer
 
 python -m alembic upgrade head        # legt masterplan.db an (SQLite, WAL-Modus)
 ```
 
 Die Rollen `understanding`/`research` müssen dem MEDIUM-Modell aus
-`MODEL_CLASS_MAP`, `architect`/`challenger` dem HIGH-Modell entsprechen. Die
-rollenbezogenen Agent-IDs sind Pflicht. Das Backend fällt bewusst nicht
-auf `main` oder einen anderen vorhandenen Agenten zurück. Insbesondere dürfen
+`MODEL_CLASS_MAP`, `architect`/`challenger`/`synthesizer` dem HIGH-Modell
+entsprechen. Die rollenbezogenen Agent-IDs sind Pflicht (Ableitung generisch
+über `MPA_OPENCLAW_AGENT_ID_<ROLLE>`, `app/model_provider.py`). Das Backend
+fällt bewusst nicht auf `main` oder einen anderen vorhandenen Agenten
+zurück. Insbesondere dürfen
 persönliche bzw. anderweitig geroutete Agenten wie `main`, `masterplan` oder
 `aktien` nicht wiederverwendet werden. Da das SDK das tatsächlich verwendete
 Modell nicht im `ExecutionResult` bestätigt, müssen Provider und Modell jedes
@@ -81,7 +87,9 @@ uvicorn app.main:app --reload
 
 Danach: `GET http://localhost:8000/health`, API unter
 `http://localhost:8000/api/projects` gemäß `docs/API_CONTRACT.md` bis zur
-Phase-3-Grenze `SYNTHESIZING`.
+Phase-4-Grenze `WAITING_FOR_SYNTHESIS_APPROVAL`/`REVIEWING` (`REVIEWING`
+selbst ist reiner Zielzustand von `synthesis/approve`, Critic läuft dort
+noch nicht).
 
 ## Tests
 
@@ -93,14 +101,19 @@ python -m pytest tests/ -v
 * `tests/test_model_provider.py` mockt `openclaw_sdk` direkt (Client/Agent/`execute`) — prüft die Adapter-Schicht selbst (Schema-Prompt, JSON-Parsing, Fehlerübersetzung, Agent-Caching) isoliert vom Router.
 * `tests/test_phase3_planning.py` erzwingt parallele Architect-/Challenger-
   Läufe, getrennte Schreibtransaktionen und den gezielten Zweig-Retry.
+* `tests/test_phase4_synthesis.py` prüft den automatischen Synthesizer-Lauf,
+  die referentielle Integrität von `existing_solutions_open_source`
+  (AT-4.1), Versionierung/`hint`-Feld bei ÄNDERUNGSWUNSCH (AT-4.2) und den
+  gezielten Retry der Synthesizer-Rolle.
 
 Kein Test führt einen echten Netzwerkaufruf aus (weder gegen OpenClaw noch gegen Anthropic); `ANTHROPIC_API_KEY` muss für `pytest` nicht gesetzt sein (Dummy-Wert in `tests/conftest.py`).
 
 ## Umfang (bewusst NICHT enthalten)
 
 * Kein SSE-Endpunkt — Live-Status ist laut Abschnitt 35 Phase 7.
-* Kein Synthesizer, Critic, Evaluator, Revision Agent oder Final Builder —
-  diese Rollen gehören zu Phase 4–6.
+* Kein Critic, Evaluator, Revision Agent oder Final Builder — diese Rollen
+  gehören zu Phase 5–6. `synthesis/approve` parkt im Zielzustand
+  `REVIEWING`, ohne `critic_v1` auszuführen.
 * Kein Docker/Packaging — Phase 7/8.
 * Kein OpenClaw-Gateway-Betrieb selbst (Installation, Konfiguration, Messaging-Anbindung) — das ist Infrastruktur, die der Nutzer gemäß OpenClaws eigener Dokumentation betreibt, nicht Teil dieses Backends.
 
@@ -112,13 +125,13 @@ backend/
     main.py            FastAPI-Einstiegspunkt
     config.py           Modellklassen-Mapping, OpenClaw-Gateway-Konfiguration, Limits (Abschnitt 20/32, API_CONTRACT.md, ADR-011)
     database.py          SQLite/WAL-Setup (DATA_MODEL.md)
-    models.py             ORM-Tabellen bis einschließlich Phase 3
+    models.py             ORM-Tabellen bis einschließlich Phase 4
     schemas.py             Agenten-Output-Schema + REST-Schemas
-    state_machine.py        Guards/States bis zur Phase-3-Grenze
+    state_machine.py        Guards/States bis zur Phase-4-Grenze
     model_provider.py        call_model (Abschnitt 20), Anbindung über OpenClaw (ADR-011), nicht direkt an Anthropic
     security.py               Secret-Redaction (SECURITY.md §2)
-    routers/projects.py        REST-Endpunkte und Phase-3-Fan-out/Fan-in
-  prompts/                     Prompt-Dateien bis architect/challenger_v1
+    routers/projects.py        REST-Endpunkte, Phase-3-Fan-out/Fan-in, Phase-4-Synthesizer-Kaskade
+  prompts/                     Prompt-Dateien bis synthesizer_v1
   alembic/                     additive Migrationen je Phase
-  tests/                       Akzeptanz- und Adapter-Tests bis Phase 3
+  tests/                       Akzeptanz- und Adapter-Tests bis Phase 4
 ```

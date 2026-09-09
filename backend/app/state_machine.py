@@ -6,9 +6,16 @@ Phase 3 tatsächlich erreichbaren Übergänge:
                               \\-> WAITING_FOR_USER_CLARIFICATION -> UNDERSTANDING
                                                                   -> ESCALATION_REQUIRED(CLARIFICATION_LIMIT) -> DRAFT
 
-Phase 3 führt `GENERATING_SOLUTIONS` aus und setzt nach zwei erfolgreichen
-Zweigen ausschließlich den Grenz-State `SYNTHESIZING`. Der Synthesizer selbst
-bleibt Phase 4 und wird hier nicht ausgeführt.
+Phase 3 führt `GENERATING_SOLUTIONS` aus. Phase 4 führt `SYNTHESIZING`
+(synthesizer_v1) automatisch im Anschluss aus und parkt bei
+`WAITING_FOR_SYNTHESIS_APPROVAL`:
+
+    SYNTHESIZING -> WAITING_FOR_SYNTHESIS_APPROVAL -> REVIEWING
+                                                    \\-> SYNTHESIZING (ÄNDERUNGSWUNSCH)
+
+`REVIEWING` ist hier nur als Zielzustand von `synthesis/approve` geführt -
+der Critic-Agent (Phase 5) wird NICHT hier ausgeführt, exakt dasselbe
+Park-Muster wie zuvor bei `SYNTHESIZING` in Phase 3.
 
 Kein Router darf einen Übergang ausführen, ohne vorher hier zu
 prüfen, ob er zulässig ist - "Kein Agent darf eigenständig
@@ -31,6 +38,8 @@ RESEARCH_READY = "RESEARCH_READY"
 WAITING_FOR_RESEARCH_APPROVAL = "WAITING_FOR_RESEARCH_APPROVAL"
 GENERATING_SOLUTIONS = "GENERATING_SOLUTIONS"
 SYNTHESIZING = "SYNTHESIZING"
+WAITING_FOR_SYNTHESIS_APPROVAL = "WAITING_FOR_SYNTHESIS_APPROVAL"
+REVIEWING = "REVIEWING"  # Zielzustand von synthesis/approve; Critic (Phase 5) hier bewusst nicht ausgeführt
 
 CLARIFICATION_LIMIT = "CLARIFICATION_LIMIT"
 

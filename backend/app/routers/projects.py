@@ -1,7 +1,8 @@
 """
-REST-Endpunkte für Phase 1-3 entsprechend API_CONTRACT.md: Intake,
-Understanding, Research und parallele Architect-/Challenger-Läufe.
-Synthesizer und Qualitätsrollen sind bewusst nicht enthalten.
+REST-Endpunkte für Phase 1-4 entsprechend API_CONTRACT.md: Intake,
+Understanding, Research, parallele Architect-/Challenger-Läufe und
+Synthesizer inkl. Nutzerfreigabe 2. Qualitätsrollen (Critic/Evaluator/
+Revision/Final Builder, Phase 5-6) sind bewusst nicht enthalten.
 """
 from __future__ import annotations
 
@@ -10,13 +11,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import update
+from sqlalchemy import update, func
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import get_db
 from app.models import (
     Project, Intake, Understanding, Research, ResearchSource,
-    Architect, Challenger, AgentRun,
+    Architect, Challenger, Synthesis, AgentRun,
 )
 from app.model_provider import call_model, ModelProviderError
 from app.research_provider import TavilyResearchProvider, ResearchProviderError
@@ -37,6 +38,9 @@ from app.schemas import (
     ArchitectOutput,
     ChallengerOutput,
     SolutionAgentOut,
+    SynthesisOutput,
+    SynthesisOut,
+    SynthesisChangeRequest,
     ClarificationAnswer,
     EscalationResolve,
 )
@@ -50,6 +54,8 @@ from app.state_machine import (
     WAITING_FOR_RESEARCH_APPROVAL,
     GENERATING_SOLUTIONS,
     SYNTHESIZING,
+    WAITING_FOR_SYNTHESIS_APPROVAL,
+    REVIEWING,
     CLARIFICATION_LIMIT,
     InvalidTransitionError,
     require_state,
@@ -67,6 +73,7 @@ UNDERSTANDING_PROMPT = (PROMPTS_DIR / "understanding_v1.md").read_text(encoding=
 RESEARCH_PROMPT = (PROMPTS_DIR / "research_v1.md").read_text(encoding="utf-8")
 ARCHITECT_PROMPT = (PROMPTS_DIR / "architect_v1.md").read_text(encoding="utf-8")
 CHALLENGER_PROMPT = (PROMPTS_DIR / "challenger_v1.md").read_text(encoding="utf-8")
+SYNTHESIZER_PROMPT = (PROMPTS_DIR / "synthesizer_v1.md").read_text(encoding="utf-8")
 
 
 def _research_provider():
@@ -487,6 +494,171 @@ def _run_solution_agents(
         project.workflow_state = SYNTHESIZING
     project.updated_at = _now()
     db.commit()
+    if project.workflow_state == SYNTHESIZING:
+        _run_synthesis_agent(db, project)
+
+
+def _current_synthesis_version(db: Session, project_id: str) -> int | None:
+    return (
+        db.query(func.max(Synthesis.version))
+        .filter(Synthesis.project_id == project_id)
+        .scalar()
+    )
+
+
+def _next_synthesis_version(db: Session, project_id: str) -> int:
+    return (_current_synthesis_version(db, project_id) or 0) + 1
+
+
+def _latest_done_research_run(db: Session, project_id: str) -> AgentRun | None:
+    return (
+        db.query(AgentRun)
+        .filter(
+            AgentRun.project_id == project_id,
+            AgentRun.role == "research",
+            AgentRun.status == "DONE",
+        )
+        .order_by(AgentRun.started_at.desc())
+        .first()
+    )
+
+
+def _build_synthesis_context(db: Session, project_id: str, comment: str | None = None) -> str:
+    """Wie _build_solution_context, aber research_sources MIT id (der
+    Synthesizer braucht sie für existing_solutions_open_source[].source_id,
+    AGENT_PROMPTS.md § synthesizer_v1) plus architect.output/
+    challenger.output. Letztere werden NICHT gewrappt - eigene, bereits
+    vertrauenswürdige Agenten-Ergebnisse sind keine externen Rohdaten
+    (globale Regel 2, AGENT_PROMPTS.md). Die Research-Lookup-Query wird
+    bewusst dupliziert statt mit _build_solution_context geteilt, um den
+    bereits abgenommenen Phase-3-Code/-Tests nicht anzufassen."""
+    intake = db.get(Intake, project_id)
+    research = db.get(Research, project_id)
+    latest_research_run = _latest_done_research_run(db, project_id)
+    sources = []
+    if latest_research_run is not None:
+        sources = db.query(ResearchSource).filter(
+            ResearchSource.agent_run_id == latest_research_run.id
+        ).all()
+
+    research_data = {
+        "solutions": json.loads(research.solutions),
+        "best_practices": json.loads(research.best_practices),
+        "open_source_potential": research.open_source_potential,
+        "conclusion": research.conclusion,
+        "sources": [{
+            "id": source.id,
+            "url": source.url,
+            "title": source.title,
+            "finding": source.finding,
+            "license_info": source.license_info,
+        } for source in sources],
+    }
+
+    architect = db.get(Architect, project_id)
+    challenger = db.get(Challenger, project_id)
+
+    context = (
+        "BESTÄTIGTER INTAKE:\n"
+        + _build_understanding_input(intake)
+        + "\n"
+        + wrap_external_research_data(research_data)
+        + "\n\nARCHITECT-ENTWURF:\n"
+        + architect.output
+        + "\n\nCHALLENGER-ENTWURF:\n"
+        + challenger.output
+    )
+    if comment:
+        context += f"\nANMERKUNG ZUM ÄNDERUNGSWUNSCH: {comment}\n"
+    return context
+
+
+def _run_synthesis_agent(db: Session, project: Project, comment: str | None = None) -> AgentRun:
+    """synthesizer_v1, atomar persistiert. Eine Synthesis-Zeile wird
+    ausschließlich bei Erfolg angelegt (wie Research/Understanding, nicht
+    wie das Architect/Challenger-Platzhaltermuster, das nur wegen der
+    Thread-Koordination existiert) - dadurch ist next_version bei Erstlauf,
+    technischem Retry und ÄNDERUNGSWUNSCH einheitlich MAX(version)+1, ohne
+    Sonderfallbehandlung (DATA_MODEL.md: nur version = MAX(version) ist
+    aktuell gültig)."""
+    _check_cost_ceiling(project)
+    attempts = db.query(AgentRun).filter(
+        AgentRun.project_id == project.id, AgentRun.role == "synthesizer"
+    ).count()
+    run = AgentRun(
+        project_id=project.id, role="synthesizer", attempt=attempts + 1,
+        status="RUNNING", started_at=_now(), model_class="HIGH",
+        prompt_id="synthesizer_v1",
+    )
+    db.add(run)
+    db.flush()
+
+    try:
+        context = _build_synthesis_context(db, project.id, comment)
+        result = call_model(
+            role="synthesizer", model_class="HIGH", system_prompt=SYNTHESIZER_PROMPT,
+            input_context=context, output_schema=SynthesisOutput,
+        )
+        output = result.parsed
+
+        latest_research_run = _latest_done_research_run(db, project.id)
+        valid_source_ids = set()
+        if latest_research_run is not None:
+            valid_source_ids = {
+                sid for (sid,) in db.query(ResearchSource.id).filter(
+                    ResearchSource.agent_run_id == latest_research_run.id
+                ).all()
+            }
+        referenced_ids = {item.source_id for item in output.existing_solutions_open_source}
+        if not referenced_ids <= valid_source_ids:
+            raise ModelProviderError(
+                "synthesizer_v1 referenziert eine nicht vorhandene research_sources.id"
+            )  # AT-4.1
+
+        version = _next_synthesis_version(db, project.id)
+        db.add(Synthesis(
+            project_id=project.id, version=version,
+            output=json.dumps(output.model_dump(), ensure_ascii=False),
+            approved_at=None,
+        ))
+
+        # referenced_by_synthesis gilt nur für die aktuelle Version (nicht
+        # kumulativ über ÄNDERUNGSWUNSCH-Runden, siehe DATA_MODEL.md "nur
+        # version = MAX(version) ist aktuell gültig").
+        db.execute(
+            update(ResearchSource)
+            .where(ResearchSource.project_id == project.id)
+            .values(referenced_by_synthesis=0)
+        )
+        if referenced_ids:
+            db.execute(
+                update(ResearchSource)
+                .where(
+                    ResearchSource.project_id == project.id,
+                    ResearchSource.id.in_(referenced_ids),
+                )
+                .values(referenced_by_synthesis=1)
+            )
+
+        run.status = "DONE"
+        run.finished_at = _now()
+        run.provider = result.provider
+        run.model = result.model
+        run.token_usage_input = result.input_tokens
+        run.token_usage_output = result.output_tokens
+        run.estimated_cost_usd = result.estimated_cost_usd
+        project.total_model_calls += 1
+        project.total_estimated_cost_usd += result.estimated_cost_usd
+        project.workflow_state = WAITING_FOR_SYNTHESIS_APPROVAL
+        project.updated_at = _now()
+    except ModelProviderError as exc:
+        run.status = "FAILED"
+        run.finished_at = _now()
+        run.error = redact_secrets(str(exc))
+        project.workflow_state = SYNTHESIZING
+
+    db.commit()
+    return run
 
 
 def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
@@ -531,6 +703,16 @@ def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
             ) for s in sources],
         )
 
+    synthesis_version = _current_synthesis_version(db, project.id)
+    synthesis_out = None
+    if synthesis_version is not None:
+        synthesis_row = db.get(Synthesis, (project.id, synthesis_version))
+        synthesis_out = SynthesisOut(
+            version=synthesis_row.version,
+            output=json.loads(synthesis_row.output),
+            approved_at=synthesis_row.approved_at,
+        )
+
     return ProjectDetail(
         id=project.id,
         title=project.title,
@@ -561,6 +743,7 @@ def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
             output=json.loads(challenger.output) if challenger.output else None,
             run_status=challenger.run_status,
         ) if challenger is not None else None),
+        synthesis=synthesis_out,
         last_run_status=last_run.status if last_run else None,
     )
 
@@ -766,6 +949,49 @@ def rerun_research(project_id: str, payload: ResearchRerun, db: Session = Depend
     return _to_project_detail(db, project)
 
 
+@router.post("/{project_id}/synthesis/approve", response_model=ProjectDetail)
+def approve_synthesis(project_id: str, db: Session = Depends(get_db)):
+    """„ZIELKONZEPT FREIGEBEN". Löst laut API_CONTRACT.md critic_v1 aus -
+    das ist bewusst NICHT Teil von Phase 4 (dieselbe Scope-Grenze wie beim
+    GENERATING_SOLUTIONS->SYNTHESIZING-Übergang in Phase 3): der Endpunkt
+    parkt in REVIEWING, ohne einen Agenten zu starten."""
+    project = _get_project_or_404(db, project_id)
+    try:
+        require_state(project, WAITING_FOR_SYNTHESIS_APPROVAL)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail={"error": {"code": "INVALID_STATE", "message": str(exc)}})
+
+    version = _current_synthesis_version(db, project_id)
+    synthesis = db.get(Synthesis, (project_id, version))
+    synthesis.approved_at = _now()
+    project.workflow_state = REVIEWING
+    project.updated_at = _now()
+    db.commit()
+    return _to_project_detail(db, project)
+
+
+@router.post("/{project_id}/synthesis/change-request", response_model=ProjectDetail)
+def change_request_synthesis(project_id: str, payload: SynthesisChangeRequest, db: Session = Depends(get_db)):
+    """„ÄNDERUNGSWUNSCH" (AT-4.2): erzeugt eine neue Synthesis-Version, kein
+    Überschreiben der vorherigen."""
+    project = _get_project_or_404(db, project_id)
+    try:
+        require_state(project, WAITING_FOR_SYNTHESIS_APPROVAL)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail={"error": {"code": "INVALID_STATE", "message": str(exc)}})
+
+    project.synthesis_revision_count += 1
+    project.workflow_state = SYNTHESIZING
+    db.commit()
+    _run_synthesis_agent(db, project, comment=payload.comment)
+    db.refresh(project)
+
+    detail = _to_project_detail(db, project)
+    if project.synthesis_revision_count >= 3:
+        detail.hint = "Konzept grundlegend neu aufsetzen?"
+    return detail
+
+
 @router.post("/{project_id}/retry", response_model=ProjectDetail)
 def retry_last_step(project_id: str, db: Session = Depends(get_db)):
     project = _get_project_or_404(db, project_id)
@@ -799,6 +1025,11 @@ def retry_last_step(project_id: str, db: Session = Depends(get_db)):
 
     if last_run.role in ("architect", "challenger"):
         _run_solution_agents(db, project, roles=(last_run.role,))
+        db.refresh(project)
+        return _to_project_detail(db, project)
+
+    if last_run.role == "synthesizer":
+        _run_synthesis_agent(db, project)
         db.refresh(project)
         return _to_project_detail(db, project)
 
