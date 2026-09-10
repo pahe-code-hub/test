@@ -1,7 +1,8 @@
 # PHASE7_CHECKPOINT.md
 
-**Status: PHASE 7 = real getestet.** Freigabe (APPROVED) steht beim
-Nutzer noch aus.
+**Status: PHASE 7 = APPROVED** (Nutzerfreigabe 2026-09-10, zusammen mit
+Phase 5/6 auf Basis des realen Ende-zu-Ende-Laufs Commit `fb0f953` —
+74/74 Tests unabhängig nachvollzogen, keine offenen Vorbehalte).
 
 Nachweis für **Phase 7 — UX/Betrieb** aus `MASTER_PLAN_v0.1.md` Abschnitt
 35 (Live-Status, Kostenanzeige, Retry, Prompt-Versionierung,

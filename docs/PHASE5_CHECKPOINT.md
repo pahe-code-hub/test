@@ -1,7 +1,8 @@
 # PHASE5_CHECKPOINT.md
 
-**Status: PHASE 5 = real getestet.** Freigabe (APPROVED) steht beim
-Nutzer noch aus.
+**Status: PHASE 5 = APPROVED** (Nutzerfreigabe 2026-09-10, zusammen mit
+Phase 6/7 auf Basis des realen Ende-zu-Ende-Laufs Commit `fb0f953` —
+74/74 Tests unabhängig nachvollzogen, keine offenen Vorbehalte).
 
 Nachweis für **Phase 5 — Qualität** aus `MASTER_PLAN_v0.1.md` Abschnitt
 35, umgesetzt nach `PLAN → IMPLEMENT → TEST → REVIEW → CHECKPOINT`.

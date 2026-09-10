@@ -1,7 +1,8 @@
 # PHASE6_CHECKPOINT.md
 
-**Status: PHASE 6 = real getestet.** Freigabe (APPROVED) steht beim
-Nutzer noch aus.
+**Status: PHASE 6 = APPROVED** (Nutzerfreigabe 2026-09-10, zusammen mit
+Phase 5/7 auf Basis des realen Ende-zu-Ende-Laufs Commit `fb0f953` —
+74/74 Tests unabhängig nachvollzogen, keine offenen Vorbehalte).
 
 Nachweis für **Phase 6 — Final Output** aus `MASTER_PLAN_v0.1.md`
 Abschnitt 35, umgesetzt nach `PLAN → IMPLEMENT → TEST → REVIEW →
