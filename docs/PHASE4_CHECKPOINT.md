@@ -1,7 +1,8 @@
 # PHASE4_CHECKPOINT.md
 
-**Status: Implementiert, mocked getestet — echter Gateway-E2E-Test steht
-aus.** Freigabe (APPROVED) bleibt wie bei den vorigen Phasen beim Nutzer.
+**Status: PHASE 4 = APPROVED** (Nutzerfreigabe 2026-09-10 auf Commit
+`24a244e` — real getestet, echter Gateway-E2E-Nachweis bis
+`WAITING_FOR_SYNTHESIS_APPROVAL`, keine offenen Vorbehalte).
 
 Nachweis für **Phase 4 — Synthese** aus `MASTER_PLAN_v0.2.md` Abschnitt 35,
 umgesetzt nach `PLAN → IMPLEMENT → TEST → REVIEW → CHECKPOINT`.
