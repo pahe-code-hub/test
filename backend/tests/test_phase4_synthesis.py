@@ -9,6 +9,8 @@ from app.model_provider import ModelCallResult, ModelProviderError
 from app.models import AgentRun, Project, ResearchSource, Synthesis
 from app.research_provider import ExtractedPage, SearchHit
 from app.schemas import (
+    CriticOutput,
+    EvaluatorOutput,
     ResearchFinding,
     ResearchOutput,
     ResearchSolution,
@@ -180,12 +182,31 @@ def test_referenced_by_synthesis_flag_recomputed_not_accumulated(client, test_en
     assert source.referenced_by_synthesis == 0
 
 
-def test_approve_transitions_to_reviewing(client):
+def test_approve_sets_approved_at_and_triggers_review_cascade(client):
+    """synthesis/approve setzt approved_at auf die Synthese UND loest jetzt
+    (Phase 5) automatisch critic_v1 -> evaluator_v1 aus - REVIEWING ist kein
+    Nutzer-Gate mehr, siehe test_phase5_quality.py fuer die Details der
+    Kaskade. call_model muss hier fuer BEIDE Rollen gemockt werden, sonst
+    laeuft der Test unbemerkt nur ueber den FAILED-Pfad (fehlender
+    MPA_OPENCLAW_AGENT_ID_CRITIC in der Testumgebung) statt das echte
+    Verhalten zu pruefen - siehe memory-lesson zu Test-Isolation."""
     project_id, _ = run_to_synthesis(client)
-    approved = client.post(f"/api/projects/{project_id}/synthesis/approve")
+
+    def fake_call_model(**kwargs):
+        role = kwargs["role"]
+        if role == "critic":
+            return result(CriticOutput(status="OK", findings=[]))
+        if role == "evaluator":
+            return result(EvaluatorOutput(status="PASS", reasoning="Passt.", required_changes=[]))
+        raise AssertionError(f"unerwartete Rolle: {role}")
+
+    with patch("app.routers.projects.call_model", side_effect=fake_call_model):
+        approved = client.post(f"/api/projects/{project_id}/synthesis/approve")
     body = approved.json()
-    assert body["workflow_state"] == "REVIEWING"
     assert body["synthesis"]["approved_at"] is not None
+    assert body["workflow_state"] == "FINALIZING"
+    assert body["critic"]["status"] == "OK"
+    assert body["evaluations"][0]["status"] == "PASS"
 
 
 def test_approve_guard_rejects_wrong_state(client):

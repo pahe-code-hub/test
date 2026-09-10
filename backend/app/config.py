@@ -55,6 +55,12 @@ MODEL_CALL_MAX_PROVIDER_RETRIES = int(os.environ.get("MPA_MODEL_MAX_PROVIDER_RET
 
 # --- Workflow-Limits (WORKFLOW_STATES.md) ----------------------------------
 MAX_CLARIFICATION_ROUNDS = int(os.environ.get("MPA_MAX_CLARIFICATION_ROUNDS", "3"))
+# Abschnitt 16: nach MAX_INTERNAL_REVISIONS erfolglosen Revisionen ->
+# ESCALATION_REQUIRED(REVISION_LIMIT). Ein manuelles RETRY_REVISION des
+# Nutzers (escalation/resolve) ist davon unabhängig und nicht selbst
+# gedeckelt - jede weitere Runde geht wieder über dasselbe Nutzer-Gate,
+# keine Endlosschleife ohne Nutzeraktion (Leitprinzip 8).
+MAX_INTERNAL_REVISIONS = int(os.environ.get("MPA_MAX_INTERNAL_REVISIONS", "2"))
 
 # --- Kosten-Notbremse (API_CONTRACT.md, Review 4 §4.2) ---------------------
 # Unabhängig von jeder Workflow-Zählvariable (revision_count etc.).

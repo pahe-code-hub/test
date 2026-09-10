@@ -1,21 +1,29 @@
 """
 Zustände und Guards aus WORKFLOW_STATES.md, beschränkt auf die bis
-Phase 3 tatsächlich erreichbaren Übergänge:
+Phase 4 tatsächlich erreichbaren Übergänge:
 
     DRAFT -> UNDERSTANDING -> WAITING_FOR_USER_CONFIRMATION -> RESEARCHING
                               \\-> WAITING_FOR_USER_CLARIFICATION -> UNDERSTANDING
                                                                   -> ESCALATION_REQUIRED(CLARIFICATION_LIMIT) -> DRAFT
 
-Phase 3 führt `GENERATING_SOLUTIONS` aus. Phase 4 führt `SYNTHESIZING`
-(synthesizer_v1) automatisch im Anschluss aus und parkt bei
-`WAITING_FOR_SYNTHESIS_APPROVAL`:
-
     SYNTHESIZING -> WAITING_FOR_SYNTHESIS_APPROVAL -> REVIEWING
                                                     \\-> SYNTHESIZING (ÄNDERUNGSWUNSCH)
 
-`REVIEWING` ist hier nur als Zielzustand von `synthesis/approve` geführt -
-der Critic-Agent (Phase 5) wird NICHT hier ausgeführt, exakt dasselbe
-Park-Muster wie zuvor bei `SYNTHESIZING` in Phase 3.
+Phase 5 führt `REVIEWING` (critic_v1) und `EVALUATING` (evaluator_v1)
+tatsächlich aus und schließt die interne Revisionsschleife:
+
+    REVIEWING -> EVALUATING (automatisch, unabhängig von OK/ANMERKUNGEN)
+    EVALUATING -> FINALIZING (PASS) - Zielzustand, final_builder (Phase 6)
+                                       wird hier NICHT ausgeführt, dasselbe
+                                       Park-Muster wie zuvor bei REVIEWING/
+                                       SYNTHESIZING
+    EVALUATING -> REVISION_REQUIRED -> REVISING (beide automatisch)
+                                        wenn revision_count < MAX_INTERNAL_REVISIONS
+    REVISING -> EVALUATING (automatisch, KEIN erneuter critic_v1-Lauf, AT-5.5)
+    EVALUATING -> ESCALATION_REQUIRED(REVISION_LIMIT)
+                  wenn revision_count >= MAX_INTERNAL_REVISIONS
+    ESCALATION_REQUIRED(REVISION_LIMIT) -> REVISING (RETRY_REVISION, Nutzer)
+                                         -> FINALIZING (ACCEPT_WITH_OPEN_POINTS, Nutzer)
 
 Kein Router darf einen Übergang ausführen, ohne vorher hier zu
 prüfen, ob er zulässig ist - "Kein Agent darf eigenständig
@@ -39,9 +47,14 @@ WAITING_FOR_RESEARCH_APPROVAL = "WAITING_FOR_RESEARCH_APPROVAL"
 GENERATING_SOLUTIONS = "GENERATING_SOLUTIONS"
 SYNTHESIZING = "SYNTHESIZING"
 WAITING_FOR_SYNTHESIS_APPROVAL = "WAITING_FOR_SYNTHESIS_APPROVAL"
-REVIEWING = "REVIEWING"  # Zielzustand von synthesis/approve; Critic (Phase 5) hier bewusst nicht ausgeführt
+REVIEWING = "REVIEWING"  # Critic läuft (Phase 5)
+EVALUATING = "EVALUATING"  # Evaluator läuft (Phase 5)
+REVISION_REQUIRED = "REVISION_REQUIRED"  # transient, kettet sofort zu REVISING
+REVISING = "REVISING"  # Revision Agent läuft (Phase 5)
+FINALIZING = "FINALIZING"  # Zielzustand nach PASS/ACCEPT_WITH_OPEN_POINTS; final_builder (Phase 6) hier bewusst nicht ausgeführt
 
 CLARIFICATION_LIMIT = "CLARIFICATION_LIMIT"
+REVISION_LIMIT = "REVISION_LIMIT"
 
 
 class InvalidTransitionError(Exception):

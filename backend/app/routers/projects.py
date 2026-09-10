@@ -1,8 +1,10 @@
 """
-REST-Endpunkte für Phase 1-4 entsprechend API_CONTRACT.md: Intake,
-Understanding, Research, parallele Architect-/Challenger-Läufe und
-Synthesizer inkl. Nutzerfreigabe 2. Qualitätsrollen (Critic/Evaluator/
-Revision/Final Builder, Phase 5-6) sind bewusst nicht enthalten.
+REST-Endpunkte für Phase 1-5 entsprechend API_CONTRACT.md: Intake,
+Understanding, Research, parallele Architect-/Challenger-Läufe,
+Synthesizer inkl. Nutzerfreigabe 2, sowie die interne Qualitätsschleife
+Critic/Evaluator/Revision inkl. Revisionslimit und Eskalation. Final
+Builder (Phase 6) ist bewusst nicht enthalten - FINALIZING bleibt hier
+reiner Zielzustand.
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.database import get_db
 from app.models import (
     Project, Intake, Understanding, Research, ResearchSource,
-    Architect, Challenger, Synthesis, AgentRun,
+    Architect, Challenger, Synthesis, Critic, Evaluation, Revision, AgentRun,
 )
 from app.model_provider import call_model, ModelProviderError
 from app.research_provider import TavilyResearchProvider, ResearchProviderError
@@ -41,6 +43,11 @@ from app.schemas import (
     SynthesisOutput,
     SynthesisOut,
     SynthesisChangeRequest,
+    CriticOutput,
+    CriticOut,
+    EvaluatorOutput,
+    EvaluationOut,
+    RevisionOutput,
     ClarificationAnswer,
     EscalationResolve,
 )
@@ -56,15 +63,20 @@ from app.state_machine import (
     SYNTHESIZING,
     WAITING_FOR_SYNTHESIS_APPROVAL,
     REVIEWING,
+    EVALUATING,
+    REVISION_REQUIRED,
+    REVISING,
+    FINALIZING,
     CLARIFICATION_LIMIT,
+    REVISION_LIMIT,
     InvalidTransitionError,
     require_state,
-    require_escalation_reason,
     clarification_limit_reached,
 )
 from app.config import (
     PROMPTS_DIR, MAX_MODEL_CALLS_PER_PROJECT,
     MAX_ESTIMATED_COST_PER_PROJECT_USD, RESEARCH_MAX_SOURCES,
+    MAX_INTERNAL_REVISIONS,
 )
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -74,6 +86,9 @@ RESEARCH_PROMPT = (PROMPTS_DIR / "research_v1.md").read_text(encoding="utf-8")
 ARCHITECT_PROMPT = (PROMPTS_DIR / "architect_v1.md").read_text(encoding="utf-8")
 CHALLENGER_PROMPT = (PROMPTS_DIR / "challenger_v1.md").read_text(encoding="utf-8")
 SYNTHESIZER_PROMPT = (PROMPTS_DIR / "synthesizer_v1.md").read_text(encoding="utf-8")
+CRITIC_PROMPT = (PROMPTS_DIR / "critic_v1.md").read_text(encoding="utf-8")
+EVALUATOR_PROMPT = (PROMPTS_DIR / "evaluator_v1.md").read_text(encoding="utf-8")
+REVISION_PROMPT = (PROMPTS_DIR / "revision_v1.md").read_text(encoding="utf-8")
 
 
 def _research_provider():
@@ -661,6 +676,297 @@ def _run_synthesis_agent(db: Session, project: Project, comment: str | None = No
     return run
 
 
+# --- Phase 5: Critic / Evaluator / Revision --------------------------------
+
+
+def _relevant_research_findings(db: Session, project_id: str) -> list[dict]:
+    """'Relevante Research-Erkenntnisse' für critic_v1 (Abschnitt 23) -
+    ausgelegt als die von der aktuellen Synthese tatsächlich referenzierten
+    Quellen (`referenced_by_synthesis`, aus Phase 4), nicht der komplette
+    Research-Fundus wie bei Architect/Challenger/Synthesizer."""
+    latest_research_run = _latest_done_research_run(db, project_id)
+    if latest_research_run is None:
+        return []
+    sources = db.query(ResearchSource).filter(
+        ResearchSource.agent_run_id == latest_research_run.id,
+        ResearchSource.referenced_by_synthesis == 1,
+    ).all()
+    return [{
+        "url": s.url, "title": s.title, "finding": s.finding,
+        "license_info": s.license_info,
+    } for s in sources]
+
+
+def _build_critic_context(db: Session, project_id: str, synthesis_output: dict) -> str:
+    """Intake + relevante Research-Erkenntnisse (gewrappt, AT-SEC.1) +
+    aktuelle Synthese. Erhält bewusst NICHT die Architect-/Challenger-
+    Rohentwürfe (ADR-005, AGENT_PROMPTS.md § critic_v1)."""
+    intake = db.get(Intake, project_id)
+    findings = _relevant_research_findings(db, project_id)
+    return (
+        "BESTÄTIGTER INTAKE:\n"
+        + _build_understanding_input(intake)
+        + "\n"
+        + wrap_external_research_data({"relevante_research_erkenntnisse": findings})
+        + "\n\nAKTUELLE SYNTHESE:\n"
+        + json.dumps(synthesis_output, ensure_ascii=False)
+    )
+
+
+def _run_critic_agent(db: Session, project: Project) -> AgentRun:
+    """critic_v1, ausgelöst durch synthesis/approve. Schreibt eine Critic-
+    Zeile nur bei Erfolg (wie Synthesis, kein Platzhalter bei FAILED) und
+    kettet danach automatisch zu evaluator_v1 - REVIEWING ist kein
+    Nutzer-Gate (WORKFLOW_STATES.md: REVIEWING -> EVALUATING automatisch,
+    unabhängig von OK/ANMERKUNGEN)."""
+    _check_cost_ceiling(project)
+    version = _current_synthesis_version(db, project.id)
+    synthesis_row = db.get(Synthesis, (project.id, version))
+    synthesis_output = json.loads(synthesis_row.output)
+
+    attempts = db.query(AgentRun).filter(
+        AgentRun.project_id == project.id, AgentRun.role == "critic"
+    ).count()
+    run = AgentRun(
+        project_id=project.id, role="critic", attempt=attempts + 1,
+        status="RUNNING", started_at=_now(), model_class="HIGH",
+        prompt_id="critic_v1",
+    )
+    db.add(run)
+    db.flush()
+
+    try:
+        context = _build_critic_context(db, project.id, synthesis_output)
+        result = call_model(
+            role="critic", model_class="HIGH", system_prompt=CRITIC_PROMPT,
+            input_context=context, output_schema=CriticOutput,
+        )
+        output = result.parsed
+
+        db.add(Critic(
+            project_id=project.id, synthesis_version=version,
+            status=output.status,
+            findings=json.dumps([f.model_dump() for f in output.findings], ensure_ascii=False),
+        ))
+
+        run.status = "DONE"
+        run.finished_at = _now()
+        run.provider = result.provider
+        run.model = result.model
+        run.token_usage_input = result.input_tokens
+        run.token_usage_output = result.output_tokens
+        run.estimated_cost_usd = result.estimated_cost_usd
+        project.total_model_calls += 1
+        project.total_estimated_cost_usd += result.estimated_cost_usd
+        project.workflow_state = EVALUATING
+        project.updated_at = _now()
+    except ModelProviderError as exc:
+        run.status = "FAILED"
+        run.finished_at = _now()
+        run.error = redact_secrets(str(exc))
+        project.workflow_state = REVIEWING
+
+    db.commit()
+    if project.workflow_state == EVALUATING:
+        _run_evaluator_agent(db, project)
+    return run
+
+
+def _latest_revision(db: Session, project_id: str) -> Revision | None:
+    return (
+        db.query(Revision)
+        .filter(Revision.project_id == project_id)
+        .order_by(Revision.number.desc())
+        .first()
+    )
+
+
+def _latest_evaluation(db: Session, project_id: str) -> Evaluation | None:
+    return (
+        db.query(Evaluation)
+        .filter(Evaluation.project_id == project_id)
+        .order_by(Evaluation.created_at.desc())
+        .first()
+    )
+
+
+def _current_synthesis_content(db: Session, project_id: str) -> dict:
+    """Für Evaluator/Revision maßgeblicher Synthese-Inhalt: die letzte
+    Revision, falls vorhanden, sonst die ursprünglich freigegebene
+    Synthese-Version (Abschnitt 23: Evaluator erhält 'aktuelle Revision').
+    Die `synthesis`-Tabellenzeile selbst bleibt unverändert - die
+    Revisionsschicht liegt logisch darüber, siehe `Revision`-Modell."""
+    revision = _latest_revision(db, project_id)
+    if revision is not None:
+        return json.loads(revision.updated_synthesis)
+    version = _current_synthesis_version(db, project_id)
+    synthesis_row = db.get(Synthesis, (project_id, version))
+    return json.loads(synthesis_row.output)
+
+
+def _build_evaluator_context(db: Session, project_id: str, synthesis_content: dict) -> str:
+    """Intake, aktuelle Synthese, Critic-Ergebnis, NUR eine Diff-Notiz der
+    letzten Revision (nicht die vollständige Historie, v0.2-Präzisierung
+    Review 3 §3.5). Erhält bewusst KEINE Research-Daten direkt
+    (WORKFLOW_STATES.md), daher kein wrap_external_research_data()."""
+    intake = db.get(Intake, project_id)
+    critic = db.get(Critic, (project_id, _current_synthesis_version(db, project_id)))
+    critic_data = {"status": critic.status, "findings": json.loads(critic.findings)} if critic else None
+
+    context = (
+        "BESTÄTIGTER INTAKE:\n"
+        + _build_understanding_input(intake)
+        + "\n\nAKTUELLE SYNTHESE:\n"
+        + json.dumps(synthesis_content, ensure_ascii=False)
+        + "\n\nCRITIC-ERGEBNIS:\n"
+        + json.dumps(critic_data, ensure_ascii=False)
+    )
+    revision = _latest_revision(db, project_id)
+    if revision is not None:
+        evaluation = db.get(Evaluation, revision.evaluation_id)
+        required = json.loads(evaluation.required_changes) if evaluation and evaluation.required_changes else []
+        context += (
+            f"\n\nDIFF-NOTIZ LETZTE REVISION (Nr. {revision.number}, {revision.changed}):\n"
+            f"adressierte geforderte Korrekturen: {json.dumps(required, ensure_ascii=False)}"
+        )
+    return context
+
+
+def _run_evaluator_agent(db: Session, project: Project) -> AgentRun:
+    """evaluator_v1. `evaluations.attempt` entspricht laut DATA_MODEL.md
+    dem `revision_count` zum Zeitpunkt der Prüfung (0 vor jeder Revision,
+    1/2 nach der ersten/zweiten). Kettet bei REVISION_REQUIRED automatisch
+    zu revision_v1, sofern das interne Limit nicht erreicht ist; sonst
+    Eskalation an den Nutzer (AT-5.4)."""
+    _check_cost_ceiling(project)
+    synthesis_content = _current_synthesis_content(db, project.id)
+
+    attempts = db.query(AgentRun).filter(
+        AgentRun.project_id == project.id, AgentRun.role == "evaluator"
+    ).count()
+    run = AgentRun(
+        project_id=project.id, role="evaluator", attempt=attempts + 1,
+        status="RUNNING", started_at=_now(), model_class="HIGH",
+        prompt_id="evaluator_v1",
+    )
+    db.add(run)
+    db.flush()
+
+    try:
+        context = _build_evaluator_context(db, project.id, synthesis_content)
+        result = call_model(
+            role="evaluator", model_class="HIGH", system_prompt=EVALUATOR_PROMPT,
+            input_context=context, output_schema=EvaluatorOutput,
+        )
+        output = result.parsed
+
+        db.add(Evaluation(
+            project_id=project.id,
+            attempt=project.revision_count,
+            status=output.status,
+            reasoning=output.reasoning,
+            required_changes=(
+                json.dumps([c.model_dump() for c in output.required_changes], ensure_ascii=False)
+                if output.required_changes else None
+            ),
+        ))
+
+        run.status = "DONE"
+        run.finished_at = _now()
+        run.provider = result.provider
+        run.model = result.model
+        run.token_usage_input = result.input_tokens
+        run.token_usage_output = result.output_tokens
+        run.estimated_cost_usd = result.estimated_cost_usd
+        project.total_model_calls += 1
+        project.total_estimated_cost_usd += result.estimated_cost_usd
+
+        if output.status == "PASS":
+            project.workflow_state = FINALIZING
+        elif project.revision_count < MAX_INTERNAL_REVISIONS:
+            project.workflow_state = REVISION_REQUIRED
+        else:
+            project.workflow_state = ESCALATION_REQUIRED
+            project.escalation_reason = REVISION_LIMIT
+        project.updated_at = _now()
+    except ModelProviderError as exc:
+        run.status = "FAILED"
+        run.finished_at = _now()
+        run.error = redact_secrets(str(exc))
+        project.workflow_state = EVALUATING
+
+    db.commit()
+    if project.workflow_state == REVISION_REQUIRED:
+        _run_revision_agent(db, project)
+    return run
+
+
+def _run_revision_agent(db: Session, project: Project) -> AgentRun:
+    """revision_v1: korrigiert ausschließlich die zuletzt geforderten
+    Punkte (`_latest_evaluation`). Erzeugt KEINE neue `synthesis`-Version,
+    sondern eine `revisions`-Zeile (siehe `_current_synthesis_content`).
+    Kettet danach immer zurück zu evaluator_v1, NIE zu critic_v1 (AT-5.5)."""
+    _check_cost_ceiling(project)
+    synthesis_content = _current_synthesis_content(db, project.id)
+    evaluation = _latest_evaluation(db, project.id)
+    required_changes = json.loads(evaluation.required_changes) if evaluation.required_changes else []
+
+    attempts = db.query(AgentRun).filter(
+        AgentRun.project_id == project.id, AgentRun.role == "revision"
+    ).count()
+    run = AgentRun(
+        project_id=project.id, role="revision", attempt=attempts + 1,
+        status="RUNNING", started_at=_now(), model_class="HIGH",
+        prompt_id="revision_v1",
+    )
+    db.add(run)
+    db.flush()
+
+    try:
+        context = (
+            "AKTUELLE SYNTHESE:\n"
+            + json.dumps(synthesis_content, ensure_ascii=False)
+            + "\n\nGEFORDERTE KORREKTUREN:\n"
+            + json.dumps(required_changes, ensure_ascii=False)
+        )
+        result = call_model(
+            role="revision", model_class="HIGH", system_prompt=REVISION_PROMPT,
+            input_context=context, output_schema=RevisionOutput,
+        )
+        output = result.parsed
+
+        project.revision_count += 1
+        db.add(Revision(
+            project_id=project.id,
+            number=project.revision_count,
+            evaluation_id=evaluation.id,
+            updated_synthesis=json.dumps(output.updated_synthesis.model_dump(), ensure_ascii=False),
+            changed=output.changed,
+        ))
+
+        run.status = "DONE"
+        run.finished_at = _now()
+        run.provider = result.provider
+        run.model = result.model
+        run.token_usage_input = result.input_tokens
+        run.token_usage_output = result.output_tokens
+        run.estimated_cost_usd = result.estimated_cost_usd
+        project.total_model_calls += 1
+        project.total_estimated_cost_usd += result.estimated_cost_usd
+        project.workflow_state = EVALUATING  # zurück zum Evaluator, kein erneuter Critic (AT-5.5)
+        project.updated_at = _now()
+    except ModelProviderError as exc:
+        run.status = "FAILED"
+        run.finished_at = _now()
+        run.error = redact_secrets(str(exc))
+        project.workflow_state = REVISING
+
+    db.commit()
+    if project.workflow_state == EVALUATING:
+        _run_evaluator_agent(db, project)
+    return run
+
+
 def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
     intake = db.get(Intake, project.id)
     understanding = db.get(Understanding, project.id)
@@ -713,6 +1019,27 @@ def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
             approved_at=synthesis_row.approved_at,
         )
 
+    critic_out = None
+    if synthesis_version is not None:
+        critic_row = db.get(Critic, (project.id, synthesis_version))
+        if critic_row is not None:
+            critic_out = CriticOut(
+                status=critic_row.status,
+                findings=json.loads(critic_row.findings),
+            )
+
+    evaluations_out = [
+        EvaluationOut(
+            attempt=e.attempt, status=e.status, reasoning=e.reasoning,
+            required_changes=json.loads(e.required_changes) if e.required_changes else [],
+            created_at=e.created_at,
+        )
+        for e in db.query(Evaluation)
+            .filter(Evaluation.project_id == project.id)
+            .order_by(Evaluation.created_at.asc())
+            .all()
+    ]
+
     return ProjectDetail(
         id=project.id,
         title=project.title,
@@ -744,6 +1071,8 @@ def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
             run_status=challenger.run_status,
         ) if challenger is not None else None),
         synthesis=synthesis_out,
+        critic=critic_out,
+        evaluations=evaluations_out,
         last_run_status=last_run.status if last_run else None,
     )
 
@@ -894,28 +1223,56 @@ def answer_clarification(project_id: str, payload: ClarificationAnswer, db: Sess
 
 @router.post("/{project_id}/escalation/resolve", response_model=ProjectDetail)
 def resolve_escalation(project_id: str, payload: EscalationResolve, db: Session = Depends(get_db)):
+    """Body-Form hängt vom aktuellen `escalation_reason` ab (API_CONTRACT.md).
+    Eine `action`, die nicht zum aktuellen Grund passt (z.B. `RETRY_REVISION`
+    bei `CLARIFICATION_LIMIT`), liefert 422."""
     project = _get_project_or_404(db, project_id)
-
-    if payload.action != "REWORK_INTAKE":
-        # RETRY_REVISION / ACCEPT_WITH_OPEN_POINTS gehören zu escalation_reason=
-        # REVISION_LIMIT, der erst ab Phase 5 (Evaluator) überhaupt entstehen
-        # kann - in Phase 1 immer ein Fehleingabe-Fall.
-        raise HTTPException(
-            status_code=422,
-            detail={"error": {"code": "INVALID_ACTION", "message": "In Phase 1 ist nur 'REWORK_INTAKE' gültig"}},
-        )
-
     try:
-        require_escalation_reason(project, CLARIFICATION_LIMIT)
+        require_state(project, ESCALATION_REQUIRED)
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=409, detail={"error": {"code": "INVALID_STATE", "message": str(exc)}})
 
-    project.workflow_state = DRAFT
-    project.escalation_reason = None
-    project.clarification_round_count = 0
-    project.updated_at = _now()
-    db.commit()
-    return _to_project_detail(db, project)
+    if project.escalation_reason == CLARIFICATION_LIMIT:
+        if payload.action != "REWORK_INTAKE":
+            raise HTTPException(
+                status_code=422,
+                detail={"error": {"code": "INVALID_ACTION", "message": "Bei CLARIFICATION_LIMIT ist nur 'REWORK_INTAKE' gültig"}},
+            )
+        project.workflow_state = DRAFT
+        project.escalation_reason = None
+        project.clarification_round_count = 0
+        project.updated_at = _now()
+        db.commit()
+        return _to_project_detail(db, project)
+
+    if project.escalation_reason == REVISION_LIMIT:
+        if payload.action == "RETRY_REVISION":
+            # Weiterer, vom Nutzer ausdrücklich angeforderter Versuch am
+            # bestehenden Zielkonzept (Abschnitt 16/WORKFLOW_STATES.md) -
+            # bewusst nicht durch MAX_INTERNAL_REVISIONS selbst gedeckelt,
+            # da jede Runde ohnehin wieder über dieses Nutzer-Gate läuft
+            # (Leitprinzip 8: keine Endlosschleife ohne Nutzeraktion).
+            project.workflow_state = REVISING
+            project.escalation_reason = None
+            db.commit()
+            _run_revision_agent(db, project)
+            db.refresh(project)
+            return _to_project_detail(db, project)
+        if payload.action == "ACCEPT_WITH_OPEN_POINTS":
+            project.workflow_state = FINALIZING
+            project.escalation_reason = None
+            project.updated_at = _now()
+            db.commit()
+            return _to_project_detail(db, project)
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "INVALID_ACTION", "message": "Bei REVISION_LIMIT ist nur 'RETRY_REVISION' oder 'ACCEPT_WITH_OPEN_POINTS' gültig"}},
+        )
+
+    raise HTTPException(
+        status_code=422,
+        detail={"error": {"code": "INVALID_ACTION", "message": f"Unbekannter escalation_reason: {project.escalation_reason!r}"}},
+    )
 
 
 @router.post("/{project_id}/research/approve", response_model=ProjectDetail)
@@ -951,10 +1308,8 @@ def rerun_research(project_id: str, payload: ResearchRerun, db: Session = Depend
 
 @router.post("/{project_id}/synthesis/approve", response_model=ProjectDetail)
 def approve_synthesis(project_id: str, db: Session = Depends(get_db)):
-    """„ZIELKONZEPT FREIGEBEN". Löst laut API_CONTRACT.md critic_v1 aus -
-    das ist bewusst NICHT Teil von Phase 4 (dieselbe Scope-Grenze wie beim
-    GENERATING_SOLUTIONS->SYNTHESIZING-Übergang in Phase 3): der Endpunkt
-    parkt in REVIEWING, ohne einen Agenten zu starten."""
+    """„ZIELKONZEPT FREIGEBEN". Löst critic_v1 aus (API_CONTRACT.md), das
+    automatisch weiter zu evaluator_v1 kettet (Phase 5)."""
     project = _get_project_or_404(db, project_id)
     try:
         require_state(project, WAITING_FOR_SYNTHESIS_APPROVAL)
@@ -967,6 +1322,8 @@ def approve_synthesis(project_id: str, db: Session = Depends(get_db)):
     project.workflow_state = REVIEWING
     project.updated_at = _now()
     db.commit()
+    _run_critic_agent(db, project)
+    db.refresh(project)
     return _to_project_detail(db, project)
 
 
@@ -1030,6 +1387,21 @@ def retry_last_step(project_id: str, db: Session = Depends(get_db)):
 
     if last_run.role == "synthesizer":
         _run_synthesis_agent(db, project)
+        db.refresh(project)
+        return _to_project_detail(db, project)
+
+    if last_run.role == "critic":
+        _run_critic_agent(db, project)
+        db.refresh(project)
+        return _to_project_detail(db, project)
+
+    if last_run.role == "evaluator":
+        _run_evaluator_agent(db, project)
+        db.refresh(project)
+        return _to_project_detail(db, project)
+
+    if last_run.role == "revision":
+        _run_revision_agent(db, project)
         db.refresh(project)
         return _to_project_detail(db, project)
 

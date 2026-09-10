@@ -84,6 +84,34 @@ class SynthesisOutput(BaseModel):
     conclusion: str
 
 
+class CriticFinding(BaseModel):
+    problem: str
+    why_relevant: str
+    recommended_change: str
+    priority: str = Field(pattern="^(KRITISCH|WICHTIG|OPTIONAL)$")
+
+
+class CriticOutput(BaseModel):
+    status: str = Field(pattern="^(OK|ANMERKUNGEN)$")
+    findings: list[CriticFinding] = Field(default_factory=list, max_length=5)
+
+
+class EvaluatorRequiredChange(BaseModel):
+    problem: str
+    required_correction: str
+
+
+class EvaluatorOutput(BaseModel):
+    status: str = Field(pattern="^(PASS|REVISION_REQUIRED)$")
+    reasoning: Optional[str] = None
+    required_changes: list[EvaluatorRequiredChange] = Field(default_factory=list, max_length=3)
+
+
+class RevisionOutput(BaseModel):
+    updated_synthesis: SynthesisOutput
+    changed: str = Field(pattern="^(GEÄNDERT|UNVERÄNDERT)$")
+
+
 # --- API: Intake (Abschnitt 3) ---------------------------------------------
 
 
@@ -163,6 +191,19 @@ class SynthesisOut(BaseModel):
     approved_at: Optional[str] = None
 
 
+class CriticOut(BaseModel):
+    status: str
+    findings: list[CriticFinding]
+
+
+class EvaluationOut(BaseModel):
+    attempt: int
+    status: str
+    reasoning: Optional[str] = None
+    required_changes: list[EvaluatorRequiredChange]
+    created_at: str
+
+
 class ProjectDetail(BaseModel):
     id: str
     title: str
@@ -180,6 +221,8 @@ class ProjectDetail(BaseModel):
     architect: Optional[SolutionAgentOut] = None
     challenger: Optional[SolutionAgentOut] = None
     synthesis: Optional[SynthesisOut] = None
+    critic: Optional[CriticOut] = None
+    evaluations: list[EvaluationOut] = Field(default_factory=list)
     last_run_status: Optional[str] = None
     # Nur im synthesis/change-request-Response gesetzt (ab Runde 3,
     # API_CONTRACT.md), NICHT generisch bei jedem GET - siehe Router.

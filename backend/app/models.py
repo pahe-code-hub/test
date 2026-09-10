@@ -1,9 +1,9 @@
 """
-ORM-Modelle für Phase 1-4 (DATA_MODEL.md): projects, intake,
+ORM-Modelle für Phase 1-5 (DATA_MODEL.md): projects, intake,
 understanding, research, research_sources, architect, challenger,
-synthesis und agent_runs. Weitere Tabellen (critic, evaluations, revisions,
-final) werden bewusst NICHT hier definiert - sie gehören zu den Phasen 5-6
-und werden erst dort ergänzt, um keine Phasen vorwegzunehmen.
+synthesis, critic, evaluations, revisions und agent_runs. `final` wird
+bewusst NICHT hier definiert - das gehört zu Phase 6 und wird erst dort
+ergänzt, um keine Phasen vorwegzunehmen.
 """
 import uuid
 from datetime import datetime, timezone
@@ -126,6 +126,55 @@ class Synthesis(Base):
     version = Column(Integer, primary_key=True)
     output = Column(Text, nullable=False)
     approved_at = Column(String, nullable=True)
+
+
+class Critic(Base):
+    """Ein Critic-Lauf je freigegebener Synthese-Version (DATA_MODEL.md,
+    PK (project_id, synthesis_version)) - critic_v1 läuft genau einmal pro
+    synthesis/approve, nie erneut innerhalb derselben Revisionsschleife
+    (AT-5.5). Nur bei Erfolg angelegt, wie bei `Synthesis` (kein
+    Platzhalter bei FAILED)."""
+
+    __tablename__ = "critic"
+
+    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+    synthesis_version = Column(Integer, primary_key=True)
+    status = Column(String, nullable=False)  # OK | ANMERKUNGEN
+    findings = Column(Text, nullable=False)  # JSON-Array, max. 5 Einträge
+
+
+class Evaluation(Base):
+    """Eine Zeile je evaluator_v1-Lauf (mehrere je Projekt möglich - vor
+    und nach jeder Revision, daher eigene id statt project_id als PK)."""
+
+    __tablename__ = "evaluations"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    attempt = Column(Integer, nullable=False)  # = revision_count zum Zeitpunkt der Prüfung
+    status = Column(String, nullable=False)  # PASS | REVISION_REQUIRED
+    reasoning = Column(Text, nullable=True)
+    required_changes = Column(Text, nullable=True)  # JSON-Array, max. 3 Einträge
+    created_at = Column(String, nullable=False, default=_now)
+
+
+class Revision(Base):
+    """Eine Zeile je revision_v1-Lauf. `updated_synthesis` trägt die
+    korrigierte Synthese-Struktur separat von der `synthesis`-Tabelle -
+    die dort freigegebene Version bleibt unverändert, die Revisionsschicht
+    liegt logisch darüber (nur die jeweils letzte Revision ist für
+    Evaluator/Final Builder maßgeblich, siehe routers/projects.py
+    `_current_synthesis_content`)."""
+
+    __tablename__ = "revisions"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    number = Column(Integer, nullable=False)  # 1 oder 2, siehe MAX_INTERNAL_REVISIONS
+    evaluation_id = Column(String, ForeignKey("evaluations.id"), nullable=False)
+    updated_synthesis = Column(Text, nullable=False)  # JSON
+    changed = Column(String, nullable=False)  # GEÄNDERT | UNVERÄNDERT
+    created_at = Column(String, nullable=False, default=_now)
 
 
 class AgentRun(Base):
