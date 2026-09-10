@@ -1,7 +1,7 @@
 # PHASE6_CHECKPOINT.md
 
-**Status: Implementiert, mocked getestet — echter Gateway-E2E-Test steht
-aus.** Freigabe (APPROVED) bleibt wie bei den vorigen Phasen beim Nutzer.
+**Status: PHASE 6 = real getestet.** Freigabe (APPROVED) steht beim
+Nutzer noch aus.
 
 Nachweis für **Phase 6 — Final Output** aus `MASTER_PLAN_v0.1.md`
 Abschnitt 35, umgesetzt nach `PLAN → IMPLEMENT → TEST → REVIEW →
@@ -138,11 +138,56 @@ Prüfung gegen AT-6.1–AT-6.4 und `SECURITY.md`:
 * Keine Phase-7/8-Funktionalität (Live-Status, Kostenanzeige, weitere
   Exportformate) wurde eingeführt.
 
+## Abschluss 2026-09-10 (real, auf dem Server des Nutzers)
+
+`mpa-final-builder` (`anthropic/claude-sonnet-5`, Rolle MEDIUM/konfigurierbar
+per `FINAL_BUILDER_MODEL_CLASS`) im Gateway angelegt und der **komplette
+Workflow von `DRAFT` bis `COMPLETED` real durchgespielt** — Projekt
+„Lesezeichen-Tool" (Web-Lesezeichen mit Tags, selbst hostbar):
+
+```
+POST /api/projects → submit → understanding/confirm
+  → research (real, mit echtem Timeout-Fehlschlag + Retry, siehe PHASE5)
+  → architect + challenger (parallel, DONE)
+  → synthesis (real, mit echtem Timeout-Fehlschlag + Retry, siehe PHASE5)
+  → synthesis/approve → critic → evaluator → revision → evaluator (PASS)
+  → final_builder → COMPLETED
+
+workflow_state: COMPLETED
+total_model_calls: 10, total_estimated_cost_usd: 2.893205
+```
+
+**AT-6.1 real bestätigt:** `final.plan` enthält alle 10 Abschnitte plus
+Präsentationsstruktur, inhaltlich kohärent und konkret (Datenmodell,
+Routen, Betriebsanleitung) statt Plattitüden; `existing_open_source_
+solutions_used` verweist auf eine tatsächlich im Kontext gezeigte
+`research_sources.id` (Shaarli als geprüfte, dokumentierte Alternative).
+
+**AT-6.2 real bestätigt:** `final.open_decisions` enthält den aus der
+Revisionsrunde übernommenen offenen Punkt ("Ergebnis des
+Shaarli-Praxistests") — der programmatische Merge
+(`_open_evaluator_points()`) griff korrekt auch im echten Lauf.
+
+**AT-6.4 real bestätigt:** `GET /export?format=markdown` liefert eine
+vollständige, 105-zeilige Markdown-Datei mit allen 10 Abschnitten plus
+Präsentationsstruktur, real gegen den laufenden Server abgerufen.
+
+**Inhaltliche Qualität, nicht nur formal grün:** Der Final Builder
+übernahm sichtbar die im Synthesizer/Critic/Evaluator-Durchlauf
+entstandene Kernentscheidung (Shaarli-Gate vor Eigenentwicklung, ADR-
+artige Begründung) unverändert und baute daraus einen konkreten,
+umsetzbaren Phasenplan inklusive Datenmodell und Betriebsanleitung — kein
+Abschreiben der Synthese, echte Weiterverarbeitung (AT-6.3-Indiz, wenn
+auch kein automatisierter Diff-Test).
+
+Zwei reale Betriebsfunde bei diesem Lauf gefunden und behoben — siehe
+`docs/PHASE5_CHECKPOINT.md` (Gateway-Routing bei Neustart,
+Timeout-Default) — keine davon Phase-6-spezifisch.
+
 ## CHECKPOINT
 
-Phase 6 ist vollständig implementiert und mit einer vollständig gemockten
-Testsuite (68/68, keine Netzwerkaufrufe) verifiziert, inklusive
-Markdown-Export. Der Workflow erreicht damit erstmals `COMPLETED` -
-Phasen 1-6 des MVP sind vollständig durchimplementiert. Ausstehend vor
-endgültiger Freigabe: ein realer Gateway-E2E-Lauf (siehe TEST). Die
-endgültige Freigabe bleibt wie bei allen vorigen Phasen beim Nutzer.
+Phase 6 ist vollständig implementiert, mocked getestet (68/68) und real
+bis `COMPLETED` verifiziert, inklusive Markdown-Export gegen den echten
+Server. Phasen 1-6 des MVP sind damit sowohl mocked als auch real
+Ende-zu-Ende nachgewiesen. Aus technischer Sicht ist Phase 6 vollständig
+freigabereif. Die endgültige Freigabe bleibt beim Nutzer.

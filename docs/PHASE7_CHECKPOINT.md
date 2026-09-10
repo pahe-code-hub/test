@@ -1,7 +1,7 @@
 # PHASE7_CHECKPOINT.md
 
-**Status: Implementiert, mocked getestet.** Freigabe (APPROVED) bleibt
-wie bei den vorigen Phasen beim Nutzer.
+**Status: PHASE 7 = real getestet.** Freigabe (APPROVED) steht beim
+Nutzer noch aus.
 
 Nachweis für **Phase 7 — UX/Betrieb** aus `MASTER_PLAN_v0.1.md` Abschnitt
 35 (Live-Status, Kostenanzeige, Retry, Prompt-Versionierung,
@@ -132,12 +132,24 @@ Prüfung gegen AT-7.1–AT-7.3:
 
 ## CHECKPOINT
 
-Phase 7 ist vollständig implementiert und mit einer vollständig gemockten
-Testsuite (74/74, keine Netzwerkaufrufe) verifiziert — inklusive eines
-echten, wenn auch mit einem dokumentierten Test-Infrastruktur-Workaround
-umgesetzten Nachweises der SSE-Mechanik. Da Phase 7 rein additive
-Endpunkte ohne Schema-Änderung und ohne neue Agentenrollen einführt, ist
-kein zusätzlicher realer Gateway-E2E-Lauf nötig — der für Phase 5+6
-geplante gemeinsame E2E-Lauf deckt (sobald durchgeführt) implizit auch
-die Live-Status-Events dieses durchlaufenden Projekts ab. Die endgültige
-Freigabe bleibt beim Nutzer.
+## Abschluss 2026-09-10 (real, auf dem Server des Nutzers)
+
+`GET /cost` real gegen das komplette Phase-5/6-E2E-Projekt (siehe
+`docs/PHASE6_CHECKPOINT.md`) abgerufen: liefert die korrekte
+Gesamtsumme (10 Aufrufe, \$2.893205) aufgeschlüsselt auf alle 9 Rollen
+inkl. `evaluator` mit 2 Aufrufen (ein `FAILED`-Versuch zählt nicht mit,
+da die Aufschlüsselung nur `status = DONE` filtert — genau wie geplant).
+Die Pub/Sub-Instrumentierung (`_publish_run_started`/`_publish_run_result`)
+lief während des gesamten realen Laufs durch alle 10 Agentenaufrufe ohne
+Fehler (keine Exception im Server-Log durch die Publish-Aufrufe) - ein
+zusätzlicher Live-Rauchtest der Instrumentierung selbst, auch ohne einen
+tatsächlich angeschlossenen SSE-Client während dieses Laufs.
+
+## CHECKPOINT
+
+Phase 7 ist vollständig implementiert, mocked getestet (74/74) und der
+Kosten-Endpunkt zusätzlich real gegen einen kompletten Projektdurchlauf
+verifiziert. Die SSE-Mechanik selbst bleibt beim dokumentierten
+Generator-Unit-Test (TestClient kann keine Endlos-Streams lesen, siehe
+TEST oben) - das Pub/Sub lief im realen Lauf nachweislich fehlerfrei
+durch. Die endgültige Freigabe bleibt beim Nutzer.

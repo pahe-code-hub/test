@@ -1,7 +1,7 @@
 # PHASE5_CHECKPOINT.md
 
-**Status: Implementiert, mocked getestet — echter Gateway-E2E-Test steht
-aus.** Freigabe (APPROVED) bleibt wie bei den vorigen Phasen beim Nutzer.
+**Status: PHASE 5 = real getestet.** Freigabe (APPROVED) steht beim
+Nutzer noch aus.
 
 Nachweis für **Phase 5 — Qualität** aus `MASTER_PLAN_v0.1.md` Abschnitt
 35, umgesetzt nach `PLAN → IMPLEMENT → TEST → REVIEW → CHECKPOINT`.
@@ -187,11 +187,58 @@ Prüfung gegen AT-5.1–AT-5.5 und `SECURITY.md`:
 * Keine Phase-6-Rolle (`final_builder`), keine UI-/SSE-Änderung wurde
   eingeführt — `FINALIZING` bleibt reiner Zielzustand.
 
+## Abschluss 2026-09-10 (real, auf dem Server des Nutzers)
+
+`mpa-critic`/`mpa-evaluator`/`mpa-revision` (alle `anthropic/claude-opus-5`,
+Rolle HIGH) im Gateway angelegt, gemeinsam mit Phase 6 in einem
+durchgehenden realen Lauf verifiziert (ein Projekt von `DRAFT` bis
+`COMPLETED`, siehe `docs/PHASE6_CHECKPOINT.md` für die Gesamtzahlen).
+
+```
+critic.status: ANMERKUNGEN (echter, inhaltlich begründeter Fund)
+evaluations: [(attempt=0, REVISION_REQUIRED), (attempt=1, PASS)]
+revision_count: 1 (die interne Revisionsschleife lief real genau einmal durch)
+```
+
+**AT-5.5 real bestätigt:** über die gesamte Schleife (critic → evaluator
+REVISION_REQUIRED → revision → evaluator PASS) lief `critic_v1` exakt
+einmal — kein zweiter Durchlauf nach der Revision, verifiziert gegen
+`agent_runs`.
+
+**Zwei reale Betriebsfunde, beide behoben:**
+
+1. Ein frisch neu gestarteter Backend-Prozess (ohne
+   `MPA_OPENCLAW_OPENAI_BASE_URL`) fällt in der Auto-Erkennung von
+   `openclaw-sdk` auf den rohen WebSocket-Gateway-Pfad zurück, der eine
+   Ed25519-Geräte-Identität (`~/.openclaw/identity/device.json`)
+   voraussetzt, die in dieser Umgebung nicht existiert und laut
+   `model_provider.py`-Kommentar in der aktuellen OpenClaw-CLI-Version
+   keinen Erzeugungsbefehl hat — Fehler `invalid handshake: first request
+   must be connect` für **jede** Rolle. Kein Code-Bug (die Umgehung über
+   die OpenAI-kompatible HTTP-Bridge war bereits in `backend/README.md`
+   dokumentiert), sondern ein Betriebsversehen bei diesem Neustart -
+   behoben durch Setzen von `MPA_OPENCLAW_OPENAI_BASE_URL`/
+   `MPA_OPENCLAW_API_KEY`, jetzt zusätzlich in `~/.bashrc` verankert.
+2. `synthesizer_v1` schlug bei genau 150s (dem damaligen
+   `MODEL_CALL_TIMEOUT_SECONDS`-Wert) real mit Timeout fehl — kein
+   Payload-/Routing-Fehler, echte Latenz einer HIGH-Klasse-Rolle mit
+   großem Kontext. Behoben durch Anheben des Defaults auf 180s
+   (`app/config.py`, siehe Commit) statt nur den Einzelfall zu übergehen.
+
+**Ein transienter technischer Fehlschlag**, kein Bug: `evaluator_v1`
+lieferte einmal eine Antwort, die nicht valides JSON war
+(`Expecting ',' delimiter: line 1 column 2763`) — nach 20s, also kein
+Timeout, sondern ein LLM-Formatierungsglitch. Der bereits vorhandene
+technische Retry (Abschnitt 27, Review 1 §1.6) behob das im ersten
+Versuch, genau wie vorgesehen — kein Code-Fix nötig, das ist der
+Mechanismus, für den Retry existiert.
+
 ## CHECKPOINT
 
-Phase 5 ist vollständig implementiert und mit einer vollständig gemockten
-Testsuite (58/58, keine Netzwerkaufrufe) verifiziert, inklusive der
-kompletten internen Revisions-/Eskalationsschleife (AT-5.4/5.5). Ausstehend
-vor endgültiger Freigabe: ein realer Gateway-E2E-Lauf (geplant gemeinsam
-mit Phase 6, siehe TEST). Die endgültige Freigabe bleibt wie bei allen
-vorigen Phasen beim Nutzer.
+Phase 5 ist vollständig implementiert, mocked getestet (58/58) und real
+über den OpenClaw-Gateway verifiziert — inklusive eines echten Durchlaufs
+der internen Revisions-/Eskalationsschleife (AT-5.4/5.5) mit inhaltlich
+begründetem Critic-Fund und tatsächlich korrigierender Revision. Zwei
+reale Betriebsfunde (Gateway-Routing, Timeout-Default) wurden behoben.
+Aus technischer Sicht ist Phase 5 vollständig freigabereif. Die
+endgültige Freigabe bleibt beim Nutzer.

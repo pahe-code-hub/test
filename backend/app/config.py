@@ -50,7 +50,13 @@ MODEL_PRICING_USD_PER_MTOK = {
     "claude-opus-5": {"input": 5.00, "output": 25.00},
 }
 
-MODEL_CALL_TIMEOUT_SECONDS = float(os.environ.get("MPA_MODEL_TIMEOUT_SECONDS", "60"))
+# 60s war der ursprüngliche Phase-1/2-Default; der reale Phase-5/6-E2E-Lauf
+# (2026-09-10) zeigte, dass HIGH-Klasse-Rollen mit großem Kontext
+# (synthesizer_v1, kompletter Research+Architect+Challenger-Kontext) real
+# zwischen ~130s und >150s brauchen können - ein Lauf schlug bei genau 150s
+# fehl (echter Timeout, kein Payload-/Routing-Fehler, per Retry mit 240s
+# erfolgreich wiederholt). Default entsprechend angehoben, überschreibbar.
+MODEL_CALL_TIMEOUT_SECONDS = float(os.environ.get("MPA_MODEL_TIMEOUT_SECONDS", "180"))
 MODEL_CALL_MAX_PROVIDER_RETRIES = int(os.environ.get("MPA_MODEL_MAX_PROVIDER_RETRIES", "2"))
 
 # --- Workflow-Limits (WORKFLOW_STATES.md) ----------------------------------
