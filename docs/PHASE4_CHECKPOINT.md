@@ -156,12 +156,44 @@ Prüfung gegen AT-4.1–AT-4.3 und `SECURITY.md`:
 * Keine Phase-5+-Rolle, kein Critic-Aufruf, keine UI-/SSE-Änderung wurde
   eingeführt.
 
+## Abschluss 2026-09-10 (real, auf dem Server des Nutzers)
+
+`mpa-synthesizer` (Modell `anthropic/claude-opus-5`, Rolle HIGH) war im
+Gateway bereits angelegt (`MPA_OPENCLAW_AGENT_ID_SYNTHESIZER` in
+`~/.bashrc`); `MPA_OPENCLAW_AGENT_ID_ARCHITECT`/`_CHALLENGER` fehlten in
+der aktuellen Shell (nicht in `~/.bashrc` persistiert, nur einmalig für
+den Phase-3-Testlauf exportiert) und wurden für diesen Lauf ergänzt.
+Kompletter Workflow real über die API durchgespielt: `POST /api/projects`
+→ `submit` → `understanding/confirm` (kettet automatisch durch Research →
+Architect+Challenger (parallel) → Synthesis).
+
+```
+workflow_state: WAITING_FOR_SYNTHESIS_APPROVAL
+research: DONE (6 reale Tavily-Quellen)
+architect.run_status: DONE
+challenger.run_status: DONE
+synthesis.version: 1
+total_model_calls: 5, total_estimated_cost_usd: 1.487729
+```
+
+Kein neuer Bug gefunden (anders als bei Phase 3: dort zwei echte
+openclaw-sdk-Bugs). AT-4.1 real bestätigt: alle `source_id`-Werte in
+`existing_solutions_open_source` referenzieren tatsächlich im Kontext
+gezeigte `research_sources.id`-Werte, keine Erfindung. Inhaltlich
+überzeugende Synthese: Challenger-Entwurf (flache Klartextdateien, kein
+Server-Stack) als Basis übernommen, gezielt nur die Sicherheits-/
+Betriebsdisziplin des Architect-Entwurfs ergänzt, Research-Erkenntnisse
+(Obsidian-Speichermodell, Simplenote-UI-Muster) korrekt als "Muster, keine
+Produkte" eingeordnet — klar erkennbare, nicht triviale Syntheseleistung,
+kein bloßes Aneinanderhängen der beiden Entwürfe.
+
+Damit sind alle in dieser und den vorigen Sitzungen offenen Punkte für
+Phase 4 real geschlossen — keine verbleibenden technischen Vorbehalte.
+
 ## CHECKPOINT
 
-Phase 4 ist vollständig implementiert und mit einer vollständig gemockten
-Testsuite (46/46, keine Netzwerkaufrufe) verifiziert. Ausstehend vor
-endgültiger Freigabe: ein realer Gateway-E2E-Lauf bis
-`WAITING_FOR_SYNTHESIS_APPROVAL` (analog zum Phase-3-Abschluss vom
-2026-09-09), inkl. Anlage eines dedizierten
-`mpa-synthesizer`-Gateway-Agenten. Die endgültige Freigabe bleibt wie bei
-allen vorigen Phasen beim Nutzer.
+Phase 4 ist vollständig implementiert, mit einer vollständig gemockten
+Testsuite (46/46) und einem realen Gateway-E2E-Lauf bis
+`WAITING_FOR_SYNTHESIS_APPROVAL` verifiziert (Kosten: $1.49, 5 echte
+Modellaufrufe, 6 echte Tavily-Quellen). Aus technischer Sicht ist Phase 4
+vollständig freigabereif. Die endgültige Freigabe bleibt beim Nutzer.
