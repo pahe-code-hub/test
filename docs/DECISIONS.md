@@ -223,3 +223,43 @@ angenommen.
 - Kein echter OpenClaw-Gateway ist in der Implementierungs-Sandbox lauffähig betreibbar (keine dauerhafte Hintergrund-Dienst-Infrastruktur, keine Messaging-Plattform-Anbindung erforderlich für unseren Zweck) — die Adapter-Schicht (`model_provider.py`) ist gegen die reale SDK-Schnittstelle gebaut und mit Mocks getestet, aber ein Ende-zu-Ende-Test gegen einen tatsächlich laufenden Gateway steht aus (muss der Nutzer in seiner eigenen Umgebung nachholen, siehe `PHASE1_CHECKPOINT.md`).
 
 **Status:** Accepted (Nutzerentscheidung nach technischer Verifikation)
+
+## ADR-012
+
+**Decision:** Phase 8 (PDF/DOCX/JSON-Export, optionales Windows-Paket)
+wird zum Zeitpunkt des Abschlusses von Phase 1-7 (2026-09-10) **nicht**
+implementiert. Das V1-MVP gilt mit Phase 7 als vollständig im Sinne der
+Definition of Done (Abschnitt 41: verlangt "Markdown-Export
+funktioniert", nicht PDF/DOCX/JSON).
+
+**Reason:** `ACCEPTANCE_TESTS.md` sagt für Phase 8 wörtlich: "Keine
+Abnahmekriterien für V1-MVP-Freigabe — Phase 8 (PDF/DOCX/JSON,
+Windows-Paket) liegt außerhalb des in Abschnitt 37 definierten
+V1-Umfangs und wird bei Bedarf separat spezifiziert." `API_CONTRACT.md`
+listet PDF/DOCX/JSON-Export explizit unter denselben "Nicht-Ziele"-
+Verweis. Es existiert also keine echte Spezifikation für Phase 8 (kein
+Zielformat/-layout, keine Ziel-Library, keine Anforderungen an ein
+Windows-Paket) — nur die Stichworte aus Abschnitt 35. Eine Implementierung
+ohne Spezifikation würde gegen Abschnitt 39 verstoßen ("OpenClaw soll
+nicht aus einer losen Chat-Historie implementieren, sondern
+ausschließlich aus der freigegebenen Spezifikation").
+
+**Alternatives:**
+- **Direkt pragmatisch umsetzen** (JSON trivial aus `final.plan`,
+  PDF/DOCX aus dem bestehenden Markdown generiert, Windows-Paket
+  weggelassen). Verworfen für diesen Zeitpunkt, da es eigenständig
+  Anforderungen erfindet (Layout, Bibliothekswahl), die der Nutzer nicht
+  vorgegeben hat — widerspricht Abschnitt 39.
+- **Erst eine PHASE8-Spezifikation entwerfen und zur Freigabe vorlegen**
+  (das in `ACCEPTANCE_TESTS.md` vorgesehene "bei Bedarf separat
+  spezifizieren"). Bleibt die nahegelegte nächste Option, sobald
+  tatsächlicher Bedarf besteht — bewusst nicht vorab in dieser Sitzung
+  erstellt, um keine Anforderungen vorwegzunehmen, die der Nutzer nicht
+  gestellt hat.
+
+**Trade-off:** Export ist bis auf Weiteres auf Markdown beschränkt
+(Phase 6). Kein Windows-Installer verfügbar. Beides laut Definition of
+Done kein Blocker für den V1-Abschluss.
+
+**Status:** Accepted (Nutzerentscheidung 2026-09-10, siehe
+`docs/PHASE7_CHECKPOINT.md` und Session-Verlauf)
