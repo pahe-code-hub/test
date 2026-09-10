@@ -9,10 +9,13 @@ PDF-DOCX-JSON-Export) sind bewusst nicht enthalten.
 from __future__ import annotations
 
 import json
+import queue
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import update, func
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -50,6 +53,8 @@ from app.schemas import (
     RevisionOutput,
     FinalBuilderOutput,
     FinalOut,
+    CostOut,
+    CostByRole,
     ClarificationAnswer,
     EscalationResolve,
 )
@@ -93,6 +98,49 @@ CRITIC_PROMPT = (PROMPTS_DIR / "critic_v1.md").read_text(encoding="utf-8")
 EVALUATOR_PROMPT = (PROMPTS_DIR / "evaluator_v1.md").read_text(encoding="utf-8")
 REVISION_PROMPT = (PROMPTS_DIR / "revision_v1.md").read_text(encoding="utf-8")
 FINAL_BUILDER_PROMPT = (PROMPTS_DIR / "final_builder_v1.md").read_text(encoding="utf-8")
+
+
+# --- Phase 7: Live-Status (SSE, API_CONTRACT.md § Fortschritt) -------------
+#
+# Leichtgewichtiges In-Prozess-Pub/Sub statt Message-Broker (V1 ist
+# Single-User/lokal, ADR-004: ein Prozess für REST+SSE+Build). Endpunkte
+# laufen als sync `def` in FastAPIs Threadpool - ein `GET .../events`-
+# Request blockiert daher NICHT die parallel laufenden, teils lang
+# dauernden Agentenläufe anderer Requests (Abschnitt 26). Events werden
+# gezielt an den bereits etablierten Transaktionsgrenzen jeder
+# `_run_<rolle>_agent()`-Funktion publiziert (AgentRun-Anlage = RUNNING,
+# abschließendes db.commit() = DONE/FAILED) - nicht an jedem einzelnen
+# Guard-Übergang ohne Agentenlauf (z.B. understanding/correct), da dort
+# der HTTP-Response selbst bereits sofort den neuen State trägt und
+# "Live-Status" (Abschnitt 26) explizit für länger dauernde Schritte gilt.
+_event_subscribers: dict[str, list[queue.Queue]] = {}
+_event_lock = threading.Lock()
+
+
+def _publish(project_id: str, event: str, data: dict) -> None:
+    with _event_lock:
+        subscribers = list(_event_subscribers.get(project_id, ()))
+    for q in subscribers:
+        q.put((event, data))
+
+
+def _publish_run_started(run: AgentRun) -> None:
+    _publish(run.project_id, "agent_run_started", {"role": run.role, "attempt": run.attempt})
+
+
+def _publish_run_result(project: Project, run: AgentRun) -> None:
+    if run.status == "DONE":
+        _publish(project.id, "agent_run_completed", {"role": run.role, "attempt": run.attempt})
+        _publish(project.id, "cost_updated", {
+            "total_model_calls": project.total_model_calls,
+            "total_estimated_cost_usd": project.total_estimated_cost_usd,
+        })
+    else:
+        _publish(project.id, "agent_run_failed", {"role": run.role, "attempt": run.attempt, "error": run.error})
+    _publish(project.id, "state_changed", {
+        "workflow_state": project.workflow_state,
+        "escalation_reason": project.escalation_reason,
+    })
 
 
 def _research_provider():
@@ -192,6 +240,7 @@ def _run_understanding_agent(db: Session, project: Project) -> AgentRun:
         prompt_id="understanding_v1",
     )
     db.add(run)
+    _publish_run_started(run)
 
     try:
         result = call_model(
@@ -207,6 +256,7 @@ def _run_understanding_agent(db: Session, project: Project) -> AgentRun:
         run.error = redact_secrets(str(exc))  # SECURITY.md §2 - nie ungeprüft speichern
         project.workflow_state = UNDERSTANDING
         db.commit()
+        _publish_run_result(project, run)
         return run
 
     output = result.parsed
@@ -239,6 +289,7 @@ def _run_understanding_agent(db: Session, project: Project) -> AgentRun:
     project.updated_at = _now()
 
     db.commit()
+    _publish_run_result(project, run)
     return run
 
 
@@ -257,6 +308,7 @@ def _run_research_agent(db: Session, project: Project, comment: str | None = Non
     )
     db.add(run)
     db.flush()
+    _publish_run_started(run)
 
     try:
         provider = _research_provider()
@@ -346,6 +398,7 @@ def _run_research_agent(db: Session, project: Project, comment: str | None = Non
         project.workflow_state = RESEARCHING
 
     db.commit()
+    _publish_run_result(project, run)
     if project.workflow_state == GENERATING_SOLUTIONS:
         _run_solution_agents(db, project)
     return run
@@ -436,14 +489,16 @@ def _run_solution_agents(
         db.add(run)
         record.run_status = "RUNNING"
         db.flush()
-        pending[role] = (model, run.id, output_schema, prompt)
+        pending[role] = (model, run.id, output_schema, prompt, run.attempt)
 
     # RUNNING-Zeilen müssen vor den unabhängigen Writer-Sessions sichtbar sein.
     db.commit()
+    for role, (_, _, _, _, attempt) in pending.items():
+        _publish(project_id, "agent_run_started", {"role": role, "attempt": attempt})
     branch_session = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
 
     def invoke(role: str):
-        model, run_id, output_schema, prompt = pending[role]
+        model, run_id, output_schema, prompt, attempt = pending[role]
         try:
             result = call_model(
                 role=role,
@@ -489,6 +544,10 @@ def _run_solution_agents(
                 update(AgentRun).where(AgentRun.id == run_id).values(**run_values)
             )
             branch_db.commit()
+        if error is not None:
+            _publish(project_id, "agent_run_failed", {"role": role, "attempt": attempt, "error": run_values["error"]})
+        else:
+            _publish(project_id, "agent_run_completed", {"role": role, "attempt": attempt})
         return result, error
 
     outcomes = {}
@@ -513,6 +572,15 @@ def _run_solution_agents(
         project.workflow_state = SYNTHESIZING
     project.updated_at = _now()
     db.commit()
+    if outcomes:
+        _publish(project_id, "cost_updated", {
+            "total_model_calls": project.total_model_calls,
+            "total_estimated_cost_usd": project.total_estimated_cost_usd,
+        })
+        _publish(project_id, "state_changed", {
+            "workflow_state": project.workflow_state,
+            "escalation_reason": project.escalation_reason,
+        })
     if project.workflow_state == SYNTHESIZING:
         _run_synthesis_agent(db, project)
 
@@ -611,6 +679,7 @@ def _run_synthesis_agent(db: Session, project: Project, comment: str | None = No
     )
     db.add(run)
     db.flush()
+    _publish_run_started(run)
 
     try:
         context = _build_synthesis_context(db, project.id, comment)
@@ -677,6 +746,7 @@ def _run_synthesis_agent(db: Session, project: Project, comment: str | None = No
         project.workflow_state = SYNTHESIZING
 
     db.commit()
+    _publish_run_result(project, run)
     return run
 
 
@@ -738,6 +808,7 @@ def _run_critic_agent(db: Session, project: Project) -> AgentRun:
     )
     db.add(run)
     db.flush()
+    _publish_run_started(run)
 
     try:
         context = _build_critic_context(db, project.id, synthesis_output)
@@ -771,6 +842,7 @@ def _run_critic_agent(db: Session, project: Project) -> AgentRun:
         project.workflow_state = REVIEWING
 
     db.commit()
+    _publish_run_result(project, run)
     if project.workflow_state == EVALUATING:
         _run_evaluator_agent(db, project)
     return run
@@ -855,6 +927,7 @@ def _run_evaluator_agent(db: Session, project: Project) -> AgentRun:
     )
     db.add(run)
     db.flush()
+    _publish_run_started(run)
 
     try:
         context = _build_evaluator_context(db, project.id, synthesis_content)
@@ -900,6 +973,7 @@ def _run_evaluator_agent(db: Session, project: Project) -> AgentRun:
         project.workflow_state = EVALUATING
 
     db.commit()
+    _publish_run_result(project, run)
     if project.workflow_state == REVISION_REQUIRED:
         _run_revision_agent(db, project)
     elif project.workflow_state == FINALIZING:
@@ -927,6 +1001,7 @@ def _run_revision_agent(db: Session, project: Project) -> AgentRun:
     )
     db.add(run)
     db.flush()
+    _publish_run_started(run)
 
     try:
         context = (
@@ -968,6 +1043,7 @@ def _run_revision_agent(db: Session, project: Project) -> AgentRun:
         project.workflow_state = REVISING
 
     db.commit()
+    _publish_run_result(project, run)
     if project.workflow_state == EVALUATING:
         _run_evaluator_agent(db, project)
     return run
@@ -1054,6 +1130,7 @@ def _run_final_builder_agent(db: Session, project: Project) -> AgentRun:
     )
     db.add(run)
     db.flush()
+    _publish_run_started(run)
 
     try:
         context = _build_final_builder_context(db, project.id, synthesis_content)
@@ -1102,6 +1179,7 @@ def _run_final_builder_agent(db: Session, project: Project) -> AgentRun:
         project.workflow_state = FINALIZING
 
     db.commit()
+    _publish_run_result(project, run)
     return run
 
 
@@ -1635,3 +1713,69 @@ def export_project(project_id: str, format: str = "markdown", db: Session = Depe
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{project_id}.md"'},
     )
+
+
+@router.get("/{project_id}/cost", response_model=CostOut)
+def get_cost(project_id: str, db: Session = Depends(get_db)):
+    """API_CONTRACT.md § Kosten - Grundlage für die optionale
+    UI-Kostenanzeige (Abschnitt 32). Nur abgeschlossene (`DONE`) Läufe
+    zählen in die Aufschlüsselung je Rolle; `FAILED`-Versuche trugen
+    keine erfolgreichen Kosten bei (siehe `estimated_cost_usd`, nur bei
+    Erfolg gesetzt)."""
+    project = _get_project_or_404(db, project_id)
+    rows = (
+        db.query(AgentRun.role, func.count(AgentRun.id), func.sum(AgentRun.estimated_cost_usd))
+        .filter(AgentRun.project_id == project_id, AgentRun.status == "DONE")
+        .group_by(AgentRun.role)
+        .all()
+    )
+    return CostOut(
+        total_model_calls=project.total_model_calls,
+        total_estimated_cost_usd=project.total_estimated_cost_usd,
+        by_role={
+            role: CostByRole(calls=calls, estimated_cost_usd=cost or 0.0)
+            for role, calls, cost in rows
+        },
+    )
+
+
+def _unsubscribe(project_id: str, subscriber: "queue.Queue") -> None:
+    with _event_lock:
+        subs = _event_subscribers.get(project_id)
+        if subs is not None and subscriber in subs:
+            subs.remove(subscriber)
+            if not subs:
+                _event_subscribers.pop(project_id, None)
+
+
+def _sse_stream(project_id: str, subscriber: "queue.Queue"):
+    """Eigenständige Generatorfunktion (nicht als Closure in der
+    Route) - dadurch direkt iterierbar in Tests, ohne über den vollen
+    ASGI-/TestClient-Stack zu gehen, der einen nie endenden Stream nicht
+    inkrementell lesen kann (siehe tests/test_phase7_ops.py)."""
+    try:
+        # Sofortiges erstes Byte: Client kann das als Bestätigung werten,
+        # dass die Subscription server-seitig aktiv ist, bevor er eine
+        # zustandsändernde Aktion auslöst.
+        yield ": connected\n\n"
+        while True:
+            try:
+                event, data = subscriber.get(timeout=15)
+                yield f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+            except queue.Empty:
+                yield ": keep-alive\n\n"
+    finally:
+        _unsubscribe(project_id, subscriber)
+
+
+@router.get("/{project_id}/events")
+def project_events(project_id: str, db: Session = Depends(get_db)):
+    """API_CONTRACT.md § Fortschritt (SSE). Bildet die 8-Schritt-
+    Statusanzeige (Abschnitt 2/26) ab, ohne dass das Frontend pollen muss.
+    Sync `def`, läuft in FastAPIs Threadpool - blockiert damit keine
+    parallel laufenden Agentenläufe anderer Requests."""
+    _get_project_or_404(db, project_id)
+    subscriber: queue.Queue = queue.Queue()
+    with _event_lock:
+        _event_subscribers.setdefault(project_id, []).append(subscriber)
+    return StreamingResponse(_sse_stream(project_id, subscriber), media_type="text/event-stream")

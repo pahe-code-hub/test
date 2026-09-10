@@ -272,6 +272,17 @@ class EscalationResolve(BaseModel):
     action: str  # Phase 1: nur "REWORK_INTAKE" gültig (CLARIFICATION_LIMIT)
 
 
+class CostByRole(BaseModel):
+    calls: int
+    estimated_cost_usd: float
+
+
+class CostOut(BaseModel):
+    total_model_calls: int
+    total_estimated_cost_usd: float
+    by_role: dict[str, CostByRole]
+
+
 class ErrorDetail(BaseModel):
     code: str
     message: str
