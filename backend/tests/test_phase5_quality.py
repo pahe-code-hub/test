@@ -4,8 +4,9 @@ Baut auf run_to_synthesis() aus test_phase4_synthesis.py auf (bis
 WAITING_FOR_SYNTHESIS_APPROVAL), mockt ab dort gezielt critic_v1/
 evaluator_v1/revision_v1. Jeder Test, der synthesis/approve oder retry
 aufruft, mockt call_model fuer JEDE in der Kaskade erreichbare Rolle -
-siehe die Test-Isolations-Lektion in test_phase4_synthesis.py.
-"""
+seit Phase 6 kettet ein PASS/ACCEPT_WITH_OPEN_POINTS automatisch WEITER
+zu final_builder_v1, siehe FINAL_NOOP unten. Test-Isolations-Lektion:
+siehe test_phase4_synthesis.py."""
 from unittest.mock import patch
 
 import pytest
@@ -18,6 +19,7 @@ from app.schemas import (
     CriticOutput,
     EvaluatorOutput,
     EvaluatorRequiredChange,
+    FinalBuilderOutput,
     RevisionOutput,
     SynthesisOutput,
 )
@@ -44,13 +46,25 @@ def revision_result(marker="revidiert", changed="GEÄNDERT"):
     ))
 
 
+def final_result(open_decisions=None):
+    """Neutraler final_builder_v1-Mock - Phase 6 selbst wird in
+    test_phase6_final.py geprueft, hier nur noetig, um die seit Phase 6
+    automatische Weiterkettung nach PASS/ACCEPT_WITH_OPEN_POINTS
+    abzuschliessen, statt unbemerkt ueber den FAILED-Pfad zu laufen."""
+    return result(FinalBuilderOutput(
+        goal_and_starting_point="Ziel", recommended_overall_solution="Lösung",
+        structure_and_components="Struktur", feature_scope="Umfang",
+        existing_open_source_solutions_used=[],
+        core_technical_decisions="Entscheidung", implementation_plan_phases="Phasen",
+        risks_and_mitigations="Risiken", open_decisions=open_decisions or [],
+        acceptance_criteria=["Kriterium"], presentation_structure="Gliederung",
+    ))
+
+
 ONE_REQUIRED_CHANGE = [EvaluatorRequiredChange(problem="Lücke", required_correction="Ergänzen")]
 
 
-def approve_with(client, project_id, cascade):
-    """cascade: dict role -> ModelCallResult | Exception | list (sequentiell
-    konsumiert). synthesis/approve loest critic_v1 -> evaluator_v1 (->
-    revision_v1 -> evaluator_v1 ...) aus - alle hier gemockt."""
+def _cascade_mock(cascade):
     counters = {}
 
     def fake_call_model(**kwargs):
@@ -64,8 +78,23 @@ def approve_with(client, project_id, cascade):
             raise entry
         return entry
 
-    with patch("app.routers.projects.call_model", side_effect=fake_call_model):
+    return fake_call_model
+
+
+def approve_with(client, project_id, cascade):
+    """cascade: dict role -> ModelCallResult | Exception | list (sequentiell
+    konsumiert). synthesis/approve loest critic_v1 -> evaluator_v1 (->
+    revision_v1 -> evaluator_v1 ... -> final_builder_v1) aus - alle hier
+    erreichbaren Rollen muessen im cascade-dict vorhanden sein."""
+    with patch("app.routers.projects.call_model", side_effect=_cascade_mock(cascade)):
         return client.post(f"/api/projects/{project_id}/synthesis/approve")
+
+
+def resolve_with(client, project_id, action, cascade):
+    with patch("app.routers.projects.call_model", side_effect=_cascade_mock(cascade)):
+        return client.post(
+            f"/api/projects/{project_id}/escalation/resolve", json={"action": action}
+        )
 
 
 def test_critic_ok_and_evaluator_pass_reach_finalizing(client, test_engine):
@@ -73,9 +102,10 @@ def test_critic_ok_and_evaluator_pass_reach_finalizing(client, test_engine):
     resp = approve_with(client, project_id, {
         "critic": critic_result("OK"),
         "evaluator": evaluator_result("PASS"),
+        "final_builder": final_result(),
     })
     body = resp.json()
-    assert body["workflow_state"] == "FINALIZING"
+    assert body["workflow_state"] == "COMPLETED"  # PASS kettet seit Phase 6 bis final_builder
     assert body["critic"]["status"] == "OK"
     assert len(body["evaluations"]) == 1
     assert body["evaluations"][0]["attempt"] == 0
@@ -97,11 +127,12 @@ def test_critic_anmerkungen_still_chains_to_evaluator_automatically(client):
             "recommended_change": "Annahme klären", "priority": "WICHTIG",
         }]),
         "evaluator": evaluator_result("PASS"),
+        "final_builder": final_result(),
     })
     body = resp.json()
     assert body["critic"]["status"] == "ANMERKUNGEN"
     assert body["critic"]["findings"][0]["priority"] == "WICHTIG"
-    assert body["workflow_state"] == "FINALIZING"  # trotzdem weitergelaufen
+    assert body["workflow_state"] == "COMPLETED"  # trotzdem weitergelaufen
 
 
 def test_revision_required_chains_to_revision_then_back_to_evaluating_not_critic(client, test_engine):
@@ -115,9 +146,10 @@ def test_revision_required_chains_to_revision_then_back_to_evaluating_not_critic
             evaluator_result("PASS"),
         ],
         "revision": revision_result(),
+        "final_builder": final_result(),
     })
     body = resp.json()
-    assert body["workflow_state"] == "FINALIZING"
+    assert body["workflow_state"] == "COMPLETED"
     assert len(body["evaluations"]) == 2
     assert body["evaluations"][0]["status"] == "REVISION_REQUIRED"
     assert body["evaluations"][0]["attempt"] == 0
@@ -164,19 +196,22 @@ def test_revision_limit_escalates_after_two_failed_revisions(client, test_engine
 
 
 def test_accept_with_open_points_finalizes_without_further_revision(client):
+    """AT-6.2 (Grundlage): die zuletzt offenen Evaluator-Punkte landen in
+    final.open_decisions - vollstaendig in test_phase6_final.py geprueft,
+    hier nur der Workflow-Uebergang."""
     project_id, _ = run_to_synthesis(client)
     approve_with(client, project_id, {
         "critic": critic_result("OK"),
         "evaluator": [evaluator_result("REVISION_REQUIRED", required_changes=ONE_REQUIRED_CHANGE)] * 3,
         "revision": [revision_result("r1"), revision_result("r2")],
     })
-    resp = client.post(
-        f"/api/projects/{project_id}/escalation/resolve",
-        json={"action": "ACCEPT_WITH_OPEN_POINTS"},
-    )
+    resp = resolve_with(client, project_id, "ACCEPT_WITH_OPEN_POINTS", {
+        "final_builder": final_result(),
+    })
     body = resp.json()
-    assert body["workflow_state"] == "FINALIZING"
+    assert body["workflow_state"] == "COMPLETED"
     assert body["escalation_reason"] is None
+    assert any("Lücke" in d for d in body["final"]["open_decisions"])
 
 
 def test_retry_revision_after_escalation_is_not_capped_at_two(client, test_engine):
@@ -190,15 +225,13 @@ def test_retry_revision_after_escalation_is_not_capped_at_two(client, test_engin
         "revision": [revision_result("r1"), revision_result("r2")],
     })
 
-    with patch("app.routers.projects.call_model", side_effect=[
-        revision_result("r3"), evaluator_result("PASS"),
-    ]):
-        resp = client.post(
-            f"/api/projects/{project_id}/escalation/resolve",
-            json={"action": "RETRY_REVISION"},
-        )
+    resp = resolve_with(client, project_id, "RETRY_REVISION", {
+        "revision": revision_result("r3"),
+        "evaluator": evaluator_result("PASS"),
+        "final_builder": final_result(),
+    })
     body = resp.json()
-    assert body["workflow_state"] == "FINALIZING"
+    assert body["workflow_state"] == "COMPLETED"
 
     Session = sessionmaker(bind=test_engine)
     with Session() as db:
@@ -218,11 +251,14 @@ def test_retry_repeats_only_failed_evaluator(client, test_engine):
     assert body["workflow_state"] == "EVALUATING"
     assert body["last_run_status"] == "FAILED"
 
-    with patch("app.routers.projects.call_model", return_value=evaluator_result("PASS")) as model:
+    with patch("app.routers.projects.call_model", side_effect=_cascade_mock({
+        "evaluator": evaluator_result("PASS"),
+        "final_builder": final_result(),
+    })) as model:
         retried = client.post(f"/api/projects/{project_id}/retry")
-    assert retried.json()["workflow_state"] == "FINALIZING"
-    assert model.call_count == 1
-    assert model.call_args.kwargs["role"] == "evaluator"
+    assert retried.json()["workflow_state"] == "COMPLETED"
+    assert model.call_count == 2
+    assert model.call_args_list[0].kwargs["role"] == "evaluator"
 
     Session = sessionmaker(bind=test_engine)
     with Session() as db:

@@ -1,9 +1,7 @@
 """
-ORM-Modelle für Phase 1-5 (DATA_MODEL.md): projects, intake,
+ORM-Modelle für Phase 1-6 (DATA_MODEL.md): projects, intake,
 understanding, research, research_sources, architect, challenger,
-synthesis, critic, evaluations, revisions und agent_runs. `final` wird
-bewusst NICHT hier definiert - das gehört zu Phase 6 und wird erst dort
-ergänzt, um keine Phasen vorwegzunehmen.
+synthesis, critic, evaluations, revisions, final und agent_runs.
 """
 import uuid
 from datetime import datetime, timezone
@@ -174,6 +172,22 @@ class Revision(Base):
     evaluation_id = Column(String, ForeignKey("evaluations.id"), nullable=False)
     updated_synthesis = Column(Text, nullable=False)  # JSON
     changed = Column(String, nullable=False)  # GEÄNDERT | UNVERÄNDERT
+    created_at = Column(String, nullable=False, default=_now)
+
+
+class Final(Base):
+    """final_builder_v1-Ergebnis (Phase 6). `open_decisions` ist laut
+    DATA_MODEL.md eine denormalisierte Kopie von `plan.open_decisions`
+    (dort bereits inklusive der ggf. aus einer Eskalation übernommenen
+    Evaluator-Punkte, siehe `_open_evaluator_points` in routers/projects.py)
+    für schnellen Zugriff ohne den kompletten `plan`-Blob zu parsen."""
+
+    __tablename__ = "final"
+
+    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+    plan = Column(Text, nullable=False)
+    presentation = Column(Text, nullable=False)
+    open_decisions = Column(Text, nullable=False)  # JSON-Array
     created_at = Column(String, nullable=False, default=_now)
 
 

@@ -1,10 +1,10 @@
 """
-REST-Endpunkte für Phase 1-5 entsprechend API_CONTRACT.md: Intake,
+REST-Endpunkte für Phase 1-6 entsprechend API_CONTRACT.md: Intake,
 Understanding, Research, parallele Architect-/Challenger-Läufe,
-Synthesizer inkl. Nutzerfreigabe 2, sowie die interne Qualitätsschleife
-Critic/Evaluator/Revision inkl. Revisionslimit und Eskalation. Final
-Builder (Phase 6) ist bewusst nicht enthalten - FINALIZING bleibt hier
-reiner Zielzustand.
+Synthesizer inkl. Nutzerfreigabe 2, die interne Qualitätsschleife
+Critic/Evaluator/Revision inkl. Revisionslimit und Eskalation, sowie
+Final Builder inkl. Markdown-Export. Phase 7/8 (Live-Status/Kostenanzeige/
+PDF-DOCX-JSON-Export) sind bewusst nicht enthalten.
 """
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import update, func
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import get_db
 from app.models import (
     Project, Intake, Understanding, Research, ResearchSource,
-    Architect, Challenger, Synthesis, Critic, Evaluation, Revision, AgentRun,
+    Architect, Challenger, Synthesis, Critic, Evaluation, Revision, Final, AgentRun,
 )
 from app.model_provider import call_model, ModelProviderError
 from app.research_provider import TavilyResearchProvider, ResearchProviderError
@@ -48,6 +48,8 @@ from app.schemas import (
     EvaluatorOutput,
     EvaluationOut,
     RevisionOutput,
+    FinalBuilderOutput,
+    FinalOut,
     ClarificationAnswer,
     EscalationResolve,
 )
@@ -67,6 +69,7 @@ from app.state_machine import (
     REVISION_REQUIRED,
     REVISING,
     FINALIZING,
+    COMPLETED,
     CLARIFICATION_LIMIT,
     REVISION_LIMIT,
     InvalidTransitionError,
@@ -76,7 +79,7 @@ from app.state_machine import (
 from app.config import (
     PROMPTS_DIR, MAX_MODEL_CALLS_PER_PROJECT,
     MAX_ESTIMATED_COST_PER_PROJECT_USD, RESEARCH_MAX_SOURCES,
-    MAX_INTERNAL_REVISIONS,
+    MAX_INTERNAL_REVISIONS, FINAL_BUILDER_MODEL_CLASS,
 )
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -89,6 +92,7 @@ SYNTHESIZER_PROMPT = (PROMPTS_DIR / "synthesizer_v1.md").read_text(encoding="utf
 CRITIC_PROMPT = (PROMPTS_DIR / "critic_v1.md").read_text(encoding="utf-8")
 EVALUATOR_PROMPT = (PROMPTS_DIR / "evaluator_v1.md").read_text(encoding="utf-8")
 REVISION_PROMPT = (PROMPTS_DIR / "revision_v1.md").read_text(encoding="utf-8")
+FINAL_BUILDER_PROMPT = (PROMPTS_DIR / "final_builder_v1.md").read_text(encoding="utf-8")
 
 
 def _research_provider():
@@ -898,6 +902,8 @@ def _run_evaluator_agent(db: Session, project: Project) -> AgentRun:
     db.commit()
     if project.workflow_state == REVISION_REQUIRED:
         _run_revision_agent(db, project)
+    elif project.workflow_state == FINALIZING:
+        _run_final_builder_agent(db, project)
     return run
 
 
@@ -965,6 +971,186 @@ def _run_revision_agent(db: Session, project: Project) -> AgentRun:
     if project.workflow_state == EVALUATING:
         _run_evaluator_agent(db, project)
     return run
+
+
+# --- Phase 6: Final Builder --------------------------------------------------
+
+
+def _open_evaluator_points(db: Session, project_id: str) -> list[str]:
+    """Offene Evaluator-Punkte, die laut WORKFLOW_STATES.md bei
+    ESCALATION_REQUIRED -> FINALIZING (ACCEPT_WITH_OPEN_POINTS) in
+    final.open_decisions übernommen werden müssen (AT-6.2). Die letzte
+    Evaluation hat nur dann noch status=REVISION_REQUIRED, wenn der
+    Nutzer sie via ACCEPT_WITH_OPEN_POINTS akzeptiert hat, statt eine
+    weitere Revision anzustoßen - beim normalen PASS-Pfad ist die letzte
+    Evaluation immer PASS."""
+    evaluation = _latest_evaluation(db, project_id)
+    if evaluation is None or evaluation.status != "REVISION_REQUIRED":
+        return []
+    changes = json.loads(evaluation.required_changes) if evaluation.required_changes else []
+    return [f"{c['problem']}: {c['required_correction']}" for c in changes]
+
+
+def _build_final_builder_context(db: Session, project_id: str, synthesis_content: dict) -> str:
+    """Intake, freigegebenes Zielkonzept, relevante Entscheidungen, plus
+    die vom Zielkonzept referenzierten research_sources als
+    <external_research_data> (v0.2-Fix, behebt Review 3 §3.1 - AGENT_PROMPTS.md
+    § final_builder_v1)."""
+    intake = db.get(Intake, project_id)
+    referenced_ids = {
+        item.get("source_id")
+        for item in synthesis_content.get("existing_solutions_open_source", [])
+    }
+    sources = []
+    if referenced_ids:
+        sources = db.query(ResearchSource).filter(
+            ResearchSource.project_id == project_id,
+            ResearchSource.id.in_(referenced_ids),
+        ).all()
+    research_data = {"referenzierte_quellen": [{
+        "id": s.id, "url": s.url, "title": s.title,
+        "finding": s.finding, "license_info": s.license_info,
+    } for s in sources]}
+
+    context = (
+        "BESTÄTIGTER INTAKE:\n"
+        + _build_understanding_input(intake)
+        + "\n\nFREIGEGEBENES ZIELKONZEPT:\n"
+        + json.dumps(synthesis_content, ensure_ascii=False)
+        + "\n\n"
+        + wrap_external_research_data(research_data)
+    )
+    open_points = _open_evaluator_points(db, project_id)
+    if open_points:
+        context += (
+            "\n\nOFFENE PUNKTE AUS DER ESKALATION (vom Nutzer ausdrücklich "
+            "akzeptiert, müssen unter open_decisions sichtbar bleiben):\n"
+            + json.dumps(open_points, ensure_ascii=False)
+        )
+    return context
+
+
+def _run_final_builder_agent(db: Session, project: Project) -> AgentRun:
+    """final_builder_v1. Prüft wie beim Synthesizer (AT-4.1) referentielle
+    Integrität der referenzierten source_ids VOR jeder Persistierung
+    (AT-6.1-Grundlage) und stellt die aus einer Eskalation übernommenen
+    offenen Evaluator-Punkte programmatisch sicher (AT-6.2), statt sich
+    allein auf Prompt-Befolgung zu verlassen."""
+    _check_cost_ceiling(project)
+    synthesis_content = _current_synthesis_content(db, project.id)
+    open_points = _open_evaluator_points(db, project.id)
+    valid_source_ids = {
+        item.get("source_id")
+        for item in synthesis_content.get("existing_solutions_open_source", [])
+    }
+
+    attempts = db.query(AgentRun).filter(
+        AgentRun.project_id == project.id, AgentRun.role == "final_builder"
+    ).count()
+    run = AgentRun(
+        project_id=project.id, role="final_builder", attempt=attempts + 1,
+        status="RUNNING", started_at=_now(), model_class=FINAL_BUILDER_MODEL_CLASS,
+        prompt_id="final_builder_v1",
+    )
+    db.add(run)
+    db.flush()
+
+    try:
+        context = _build_final_builder_context(db, project.id, synthesis_content)
+        result = call_model(
+            role="final_builder", model_class=FINAL_BUILDER_MODEL_CLASS,
+            system_prompt=FINAL_BUILDER_PROMPT, input_context=context,
+            output_schema=FinalBuilderOutput,
+        )
+        output = result.parsed
+
+        referenced_ids = {item.source_id for item in output.existing_open_source_solutions_used}
+        if not referenced_ids <= valid_source_ids:
+            raise ModelProviderError(
+                "final_builder_v1 referenziert eine research_sources.id, die "
+                "dem Zielkonzept nicht zugeordnet ist"
+            )  # AT-6.1-Grundlage, analog AT-4.1
+
+        merged_open_decisions = list(output.open_decisions)
+        for point in open_points:
+            if point not in merged_open_decisions:
+                merged_open_decisions.append(point)
+        output.open_decisions = merged_open_decisions  # AT-6.2
+
+        db.add(Final(
+            project_id=project.id,
+            plan=json.dumps(output.model_dump(), ensure_ascii=False),
+            presentation=output.presentation_structure,
+            open_decisions=json.dumps(merged_open_decisions, ensure_ascii=False),
+        ))
+
+        run.status = "DONE"
+        run.finished_at = _now()
+        run.provider = result.provider
+        run.model = result.model
+        run.token_usage_input = result.input_tokens
+        run.token_usage_output = result.output_tokens
+        run.estimated_cost_usd = result.estimated_cost_usd
+        project.total_model_calls += 1
+        project.total_estimated_cost_usd += result.estimated_cost_usd
+        project.workflow_state = COMPLETED
+        project.updated_at = _now()
+    except ModelProviderError as exc:
+        run.status = "FAILED"
+        run.finished_at = _now()
+        run.error = redact_secrets(str(exc))
+        project.workflow_state = FINALIZING
+
+    db.commit()
+    return run
+
+
+_FINAL_MARKDOWN_SECTIONS = (
+    ("goal_and_starting_point", "Ziel und Ausgangslage"),
+    ("recommended_overall_solution", "Empfohlene Gesamtlösung"),
+    ("structure_and_components", "Aufbau und Komponenten"),
+    ("feature_scope", "Funktionsumfang"),
+    ("core_technical_decisions", "Technische Grundentscheidungen"),
+    ("implementation_plan_phases", "Umsetzungsplan in Phasen"),
+    ("risks_and_mitigations", "Risiken und Gegenmaßnahmen"),
+)
+
+
+def _render_final_markdown(title: str, plan: dict) -> str:
+    """AT-6.4: eine valide, vollständige Markdown-Datei mit allen 10 in
+    AGENT_PROMPTS.md § final_builder_v1 definierten Abschnitten plus
+    Präsentationsstruktur."""
+    lines = [f"# {title}", ""]
+    for field, heading in _FINAL_MARKDOWN_SECTIONS:
+        lines += [f"## {heading}", "", str(plan.get(field, "")), ""]
+
+    lines += ["## Verwendete bestehende/Open-Source-Lösungen", ""]
+    used = plan.get("existing_open_source_solutions_used") or []
+    if used:
+        for item in used:
+            lines.append(f"- `{item.get('source_id')}`: {item.get('how_used')}")
+    else:
+        lines.append("- keine")
+    lines.append("")
+
+    lines += ["## Offene Entscheidungen", ""]
+    open_decisions = plan.get("open_decisions") or []
+    if open_decisions:
+        lines += [f"- {d}" for d in open_decisions]
+    else:
+        lines.append("- keine")
+    lines.append("")
+
+    lines += ["## Abnahmekriterien", ""]
+    criteria = plan.get("acceptance_criteria") or []
+    if criteria:
+        lines += [f"- {c}" for c in criteria]
+    else:
+        lines.append("- keine")
+    lines.append("")
+
+    lines += ["## Präsentationsstruktur", "", str(plan.get("presentation_structure", "")), ""]
+    return "\n".join(lines)
 
 
 def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
@@ -1040,6 +1226,16 @@ def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
             .all()
     ]
 
+    final_row = db.get(Final, project.id)
+    final_out = None
+    if final_row is not None:
+        final_out = FinalOut(
+            plan=json.loads(final_row.plan),
+            presentation=final_row.presentation,
+            open_decisions=json.loads(final_row.open_decisions),
+            created_at=final_row.created_at,
+        )
+
     return ProjectDetail(
         id=project.id,
         title=project.title,
@@ -1073,6 +1269,7 @@ def _to_project_detail(db: Session, project: Project) -> ProjectDetail:
         synthesis=synthesis_out,
         critic=critic_out,
         evaluations=evaluations_out,
+        final=final_out,
         last_run_status=last_run.status if last_run else None,
     )
 
@@ -1263,6 +1460,8 @@ def resolve_escalation(project_id: str, payload: EscalationResolve, db: Session 
             project.escalation_reason = None
             project.updated_at = _now()
             db.commit()
+            _run_final_builder_agent(db, project)
+            db.refresh(project)
             return _to_project_detail(db, project)
         raise HTTPException(
             status_code=422,
@@ -1405,4 +1604,34 @@ def retry_last_step(project_id: str, db: Session = Depends(get_db)):
         db.refresh(project)
         return _to_project_detail(db, project)
 
+    if last_run.role == "final_builder":
+        _run_final_builder_agent(db, project)
+        db.refresh(project)
+        return _to_project_detail(db, project)
+
     raise HTTPException(status_code=409, detail={"error": {"code": "UNSUPPORTED_ROLE", "message": "Retry für diese Rolle ist noch nicht implementiert"}})
+
+
+@router.get("/{project_id}/export")
+def export_project(project_id: str, format: str = "markdown", db: Session = Depends(get_db)):
+    """API_CONTRACT.md § Export - nur `format=markdown` (Phase 6);
+    PDF/DOCX/JSON sind Phase 8 und hier nicht unterstützt."""
+    project = _get_project_or_404(db, project_id)
+    try:
+        require_state(project, COMPLETED)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail={"error": {"code": "INVALID_STATE", "message": str(exc)}})
+
+    if format != "markdown":
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "UNSUPPORTED_FORMAT", "message": "Nur format=markdown ist in Phase 6 unterstützt"}},
+        )
+
+    final = db.get(Final, project_id)
+    markdown = _render_final_markdown(project.title, json.loads(final.plan))
+    return Response(
+        content=markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{project_id}.md"'},
+    )

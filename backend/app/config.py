@@ -62,6 +62,11 @@ MAX_CLARIFICATION_ROUNDS = int(os.environ.get("MPA_MAX_CLARIFICATION_ROUNDS", "3
 # keine Endlosschleife ohne Nutzeraktion (Leitprinzip 8).
 MAX_INTERNAL_REVISIONS = int(os.environ.get("MPA_MAX_INTERNAL_REVISIONS", "2"))
 
+# --- Final Builder (Phase 6, AGENT_PROMPTS.md § final_builder_v1) ----------
+# Laut Masterplan "MITTEL oder HOCH (konfigurierbar)" - anders als die
+# übrigen Rollen hier bewusst konfigurierbar statt im Router hart codiert.
+FINAL_BUILDER_MODEL_CLASS = os.environ.get("MPA_FINAL_BUILDER_MODEL_CLASS", "HIGH")
+
 # --- Kosten-Notbremse (API_CONTRACT.md, Review 4 §4.2) ---------------------
 # Unabhängig von jeder Workflow-Zählvariable (revision_count etc.).
 MAX_MODEL_CALLS_PER_PROJECT = int(os.environ.get("MPA_MAX_MODEL_CALLS_PER_PROJECT", "50"))

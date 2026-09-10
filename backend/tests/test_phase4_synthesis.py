@@ -11,6 +11,7 @@ from app.research_provider import ExtractedPage, SearchHit
 from app.schemas import (
     CriticOutput,
     EvaluatorOutput,
+    FinalBuilderOutput,
     ResearchFinding,
     ResearchOutput,
     ResearchSolution,
@@ -184,10 +185,11 @@ def test_referenced_by_synthesis_flag_recomputed_not_accumulated(client, test_en
 
 def test_approve_sets_approved_at_and_triggers_review_cascade(client):
     """synthesis/approve setzt approved_at auf die Synthese UND loest jetzt
-    (Phase 5) automatisch critic_v1 -> evaluator_v1 aus - REVIEWING ist kein
-    Nutzer-Gate mehr, siehe test_phase5_quality.py fuer die Details der
-    Kaskade. call_model muss hier fuer BEIDE Rollen gemockt werden, sonst
-    laeuft der Test unbemerkt nur ueber den FAILED-Pfad (fehlender
+    (Phase 5+6) automatisch critic_v1 -> evaluator_v1 -> final_builder_v1
+    aus - REVIEWING ist kein Nutzer-Gate mehr, siehe test_phase5_quality.py/
+    test_phase6_final.py fuer die Details der Kaskade. call_model muss hier
+    fuer JEDE erreichbare Rolle gemockt werden, sonst laeuft der Test
+    unbemerkt nur ueber den FAILED-Pfad (fehlender
     MPA_OPENCLAW_AGENT_ID_CRITIC in der Testumgebung) statt das echte
     Verhalten zu pruefen - siehe memory-lesson zu Test-Isolation."""
     project_id, _ = run_to_synthesis(client)
@@ -198,15 +200,25 @@ def test_approve_sets_approved_at_and_triggers_review_cascade(client):
             return result(CriticOutput(status="OK", findings=[]))
         if role == "evaluator":
             return result(EvaluatorOutput(status="PASS", reasoning="Passt.", required_changes=[]))
+        if role == "final_builder":
+            return result(FinalBuilderOutput(
+                goal_and_starting_point="Ziel", recommended_overall_solution="Lösung",
+                structure_and_components="Struktur", feature_scope="Umfang",
+                existing_open_source_solutions_used=[], core_technical_decisions="Entscheidung",
+                implementation_plan_phases="Phasen", risks_and_mitigations="Risiken",
+                open_decisions=[], acceptance_criteria=["Kriterium"],
+                presentation_structure="Gliederung",
+            ))
         raise AssertionError(f"unerwartete Rolle: {role}")
 
     with patch("app.routers.projects.call_model", side_effect=fake_call_model):
         approved = client.post(f"/api/projects/{project_id}/synthesis/approve")
     body = approved.json()
     assert body["synthesis"]["approved_at"] is not None
-    assert body["workflow_state"] == "FINALIZING"
+    assert body["workflow_state"] == "COMPLETED"
     assert body["critic"]["status"] == "OK"
     assert body["evaluations"][0]["status"] == "PASS"
+    assert body["final"] is not None
 
 
 def test_approve_guard_rejects_wrong_state(client):

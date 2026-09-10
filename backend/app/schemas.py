@@ -112,6 +112,25 @@ class RevisionOutput(BaseModel):
     changed: str = Field(pattern="^(GEÄNDERT|UNVERÄNDERT)$")
 
 
+class FinalExistingSolution(BaseModel):
+    source_id: str
+    how_used: str
+
+
+class FinalBuilderOutput(BaseModel):
+    goal_and_starting_point: str
+    recommended_overall_solution: str
+    structure_and_components: str
+    feature_scope: str
+    existing_open_source_solutions_used: list[FinalExistingSolution]
+    core_technical_decisions: str
+    implementation_plan_phases: str
+    risks_and_mitigations: str
+    open_decisions: list[str]
+    acceptance_criteria: list[str]
+    presentation_structure: str
+
+
 # --- API: Intake (Abschnitt 3) ---------------------------------------------
 
 
@@ -204,6 +223,13 @@ class EvaluationOut(BaseModel):
     created_at: str
 
 
+class FinalOut(BaseModel):
+    plan: dict
+    presentation: str
+    open_decisions: list[str]
+    created_at: str
+
+
 class ProjectDetail(BaseModel):
     id: str
     title: str
@@ -223,6 +249,7 @@ class ProjectDetail(BaseModel):
     synthesis: Optional[SynthesisOut] = None
     critic: Optional[CriticOut] = None
     evaluations: list[EvaluationOut] = Field(default_factory=list)
+    final: Optional[FinalOut] = None
     last_run_status: Optional[str] = None
     # Nur im synthesis/change-request-Response gesetzt (ab Runde 3,
     # API_CONTRACT.md), NICHT generisch bei jedem GET - siehe Router.

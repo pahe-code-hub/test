@@ -25,6 +25,11 @@ tatsächlich aus und schließt die interne Revisionsschleife:
     ESCALATION_REQUIRED(REVISION_LIMIT) -> REVISING (RETRY_REVISION, Nutzer)
                                          -> FINALIZING (ACCEPT_WITH_OPEN_POINTS, Nutzer)
 
+Phase 6 führt `FINALIZING` (final_builder_v1) tatsächlich aus und erreicht
+den Endzustand:
+
+    FINALIZING -> COMPLETED (automatisch, final_builder_v1 abgeschlossen)
+
 Kein Router darf einen Übergang ausführen, ohne vorher hier zu
 prüfen, ob er zulässig ist - "Kein Agent darf eigenständig
 Workflow-Schritte überspringen" (Masterplan Abschnitt 5).
@@ -51,7 +56,8 @@ REVIEWING = "REVIEWING"  # Critic läuft (Phase 5)
 EVALUATING = "EVALUATING"  # Evaluator läuft (Phase 5)
 REVISION_REQUIRED = "REVISION_REQUIRED"  # transient, kettet sofort zu REVISING
 REVISING = "REVISING"  # Revision Agent läuft (Phase 5)
-FINALIZING = "FINALIZING"  # Zielzustand nach PASS/ACCEPT_WITH_OPEN_POINTS; final_builder (Phase 6) hier bewusst nicht ausgeführt
+FINALIZING = "FINALIZING"  # Final Builder läuft (Phase 6)
+COMPLETED = "COMPLETED"  # Endzustand - Plan fertiggestellt
 
 CLARIFICATION_LIMIT = "CLARIFICATION_LIMIT"
 REVISION_LIMIT = "REVISION_LIMIT"
